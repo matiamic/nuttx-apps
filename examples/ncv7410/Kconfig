@@ -1,0 +1,31 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+menuconfig EXAMPLES_NCV7410
+	tristate "NCV7410 MAC-PHY SPI demo"
+	default n
+	depends on SPI
+	select SPI_DRIVER
+	---help---
+		Enable ncv7410 demo.
+
+if EXAMPLES_NCV7410
+
+config EXAMPLES_NCV7410_PROGNAME
+	string "Program name"
+	default "ncv7410"
+	---help---
+		This is the name of the program that will be used when the ELF
+		program is installed.
+
+config EXAMPLES_NCV7410_PRIORITY
+	int "Task priority"
+	default 100
+
+config EXAMPLES_NCV7410_STACKSIZE
+	int "Stack size"
+	default DEFAULT_TASK_STACKSIZE
+
+endif # EXAMPLES_NCV7410
