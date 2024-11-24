@@ -1,62 +1,47 @@
 #include <stdio.h>
+#include <unistd.h>
 
 #include <nuttx/spi/spi_transfer.h>
 #include <nuttx/spi/spi.h>
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
 
-#include <unistd.h>
+#include "oa_tc6_control_transaction_protocol.h"
 
 #define SPI_DRIVER_PATH "/dev/spi2"
-#define BUFFER_SIZE 10
-#define NCV7410_SPI_MODE 0
-
-static int ncv7410_spi_transfer(int fd, FAR struct spi_sequence_s *seq)
-{
-  /* Perform the IOCTL */
-
-  return ioctl(fd, SPIIOC_TRANSFER, (unsigned long)((uintptr_t)seq));
-}
 
 int main(int argc, FAR char *argv[])
 {
-  struct spi_trans_s trans;
-  struct spi_sequence_s seq;
   int fd;
-
-  uint8_t txdata[BUFFER_SIZE] = { 0xAA, 0x01 };
-  uint8_t rxdata[BUFFER_SIZE] = { 0 };
+  uint32_t reg;
 
   fd = open(SPI_DRIVER_PATH, O_RDONLY);
 
-  seq.dev = SPIDEV_ID(SPIDEVTYPE_USER, 0);
-  seq.mode = NCV7410_SPI_MODE;
-  seq.nbits = 8;
-  seq.frequency = 20000000;
-  seq.ntrans = 1;
-  seq.trans = &trans;
+  // test read
+  if (oa_tc6_read_register(fd, 0x0, 0x0000, &reg)) printf("erorr: ");
+  printf("SPI Identification Register, IDVER:  0x%08lx, MAJVER: %ld, MINVER: %ld\n",
+         reg,
+         (reg & (0xF << 4)) >> 4,
+         reg & 0xF);
+  if (oa_tc6_read_register(fd, 0x0, 0x0001, &reg)) printf("error: ");
+  printf("SPI Identification Register, PHY ID: 0x%08lx, MODEL: 0x%02lx, REV: %ld\n", reg,
+         (reg & (0x3F << 4)) >> 4,
+         reg & 0xF);
+  if (oa_tc6_read_register(fd, 12, 0x0012, &reg)) printf("error: ");
+  printf("DIO Configuration Register: 0x%08lx\n", reg);
 
-  // must be true in between control - data / data - control
-  trans.deselect = true;
-  trans.delay = 0;
-  trans.nwords = 2;
-  trans.txbuffer = txdata;
-  trans.rxbuffer = rxdata;
-
-  while (1)
+  // test write -- blink with dio0 and dio1 in counterphase
+  for (int i = 0; i < 4; i++)
     {
-      seq.mode = 0; // 0 - 3
-      ncv7410_spi_transfer(fd, &seq);
-      seq.mode = 1;
-      ncv7410_spi_transfer(fd, &seq);
-      seq.mode = 2;
-      ncv7410_spi_transfer(fd, &seq);
-      seq.mode = 3;
-      ncv7410_spi_transfer(fd, &seq);
+      reg = 0x0302;
+      if (oa_tc6_write_register(fd, 12, 0x0012, reg)) printf("error writing\n");
+      usleep(250000);
+      reg = 0x0203;
+      if (oa_tc6_write_register(fd, 12, 0x0012, reg)) printf("error writing\n");
       usleep(250000);
     }
-
-  printf("hello");
+  reg = 0x6060;  // return the default value
+  if (oa_tc6_write_register(fd, 12, 0x0012, reg)) printf("error writing\n");
   return 0;
 }
 
