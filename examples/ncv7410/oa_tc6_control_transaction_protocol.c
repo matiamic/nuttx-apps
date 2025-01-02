@@ -12,7 +12,7 @@
 
 static int get_parity(uint32_t p)
 {
-  // 1 if odd parity, zero othervise
+  // 1 if odd parity, zero otherwise
   return __builtin_popcount(p) % 2;
 }
 
