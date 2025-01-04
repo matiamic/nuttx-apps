@@ -241,6 +241,8 @@ static void init(int *fd)
 
   // setup SPI protocol and enable (see page 63 of datasheet)
   regval = 0x0000BC06;
+  regval &= ~(CONFIG0_CPS_MASK);     // clear Chunk Payload Size
+  regval |= (5 << CONFIG0_CPS_POS);  // set Chunk Payload Size to 2^5 = 32
   if (write_reg(spifd, CONFIG0_MMS, CONFIG0_ADDR, regval)) printf("error writing\n");
   *fd = spifd;
   return;
@@ -279,33 +281,37 @@ int main(int argc, FAR char *argv[])
       printf("PHY CONTROL register:   0x%08lx\n", reg);
       if (read_reg(fd, PHY_STATUS_REG_MMS, PHY_STATUS_REG_ADDR, &reg)) printf("error: ");
       printf("PHY STATUS register:    0x%08lx\n", reg);
-      /* poll_footer(fd, &s); */
-      /* printf("Chunk available to read: %d\nChunks available to write: %d\n", s.rca, s.txc); */
+      poll_footer(fd, &s);
+      printf("Chunk available to read: %d\nChunks available to write: %d\n", s.rca, s.txc);
     }
   while (1)
     {
-      /* uint8_t rxbuf[CHUNK_DEFAULT_SIZE];  // provide whole (+4) buffer for now */
+      uint8_t rxbuf[CHUNK_DEFAULT_SIZE];  // provide whole (+4) buffer for now
       poll_footer(fd, &s);
-      getchar();
+
+      char cmd = '\0';
+      while (s.rca)
+        {
+          uint32_t f = read_chunk(fd, &s, rxbuf);
+          for (int i = 0; i < CHUNK_DEFAULT_PAYLOAD_SIZE; i++)
+            {
+              printf("%02x ", rxbuf[i]);
+            }
+          printf("\n");
+          for (int i = 0; i < CHUNK_DEFAULT_PAYLOAD_SIZE; i++)
+            {
+              printf("%c ", rxbuf[i]);
+            }
+          printf("\nChunk available to read: %d\nChunks available to write: %d\n", s.rca, s.txc);
+          printf("0x%08lx\n", f);  // print footer
+          if (read_reg(fd, STATUS0_MMS, STATUS0_ADDR, &reg)) printf("error: ");
+          printf("STATUS0 register:       0x%08lx\n", reg);
+          cmd = getchar();
+          if (cmd == 'q') break;
+        }
+      if (cmd == 'q') break;
+      usleep(100000); // 100 ms
     }
-      /* char cmd = '\0'; */
-      /* while (s.rca) */
-      /*   { */
-      /*     uint32_t f = read_chunk(fd, &s, rxbuf); */
-      /*     for (int i = 0; i < CHUNK_DEFAULT_PAYLOAD_SIZE; i++) */
-      /*       { */
-      /*         printf("%02x ", rxbuf[i]); */
-      /*       } */
-      /*     printf("\nChunk available to read: %d\nChunks available to write: %d\n", s.rca, s.txc); */
-      /*     printf("0x%08lx\n", f);  // print footer */
-      /*     if (read_reg(fd, STATUS0_MMS, STATUS0_ADDR, &reg)) printf("error: "); */
-      /*     printf("STATUS0 register:       0x%08lx\n", reg); */
-      /*     cmd = getchar(); */
-      /*     if (cmd == 'q') break; */
-      /*   } */
-      /* if (cmd == 'q') break; */
-      /* usleep(100000); // 100 ms */
-    /* } */
   close(fd);
   return 0;
 }
