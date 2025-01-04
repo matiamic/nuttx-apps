@@ -18,7 +18,8 @@ struct ncv7410_state
 #define CHUNK_DEFAULT_PAYLOAD_SIZE 32
 #define CHUNK_DEFAULT_SIZE (CHUNK_DEFAULT_PAYLOAD_SIZE + 4)
 
-#define SPI_FREQ 20000000
+/* #define SPI_FREQ 20000000 */
+#define SPI_FREQ 10000000
 
 /* nvc7410 registers, most defined in OpenAlliance TC6 */
 #define IDVER_ADDR               0x0U
@@ -32,6 +33,8 @@ struct ncv7410_state
 
 #define RESET_ADDR               0x3U
 #define RESET_MMS                0
+#define RESET_SWRESET_MASK       BIT(0)
+#define RESET_SWRESET_POS        0
 
 #define CONFIG0_ADDR             0x4U
 #define CONFIG0_MMS              0
@@ -40,6 +43,8 @@ struct ncv7410_state
 
 #define STATUS0_ADDR             0x8U
 #define STATUS0_MMS              0
+#define STATUS0_HDRE_MASK        BIT(5)
+#define STATUS0_HDRE_POS         5
 
 #define BUFSTS_ADDR              0xBU
 #define BUFSTS_MMS               0

@@ -107,7 +107,7 @@ int write_reg(int spifd, uint8_t mms, uint16_t addr, uint32_t reg)
   return 0;
 }
 
-void poll_footer(int spifd, struct ncv7410_state *s)
+uint32_t poll_footer(int spifd, struct ncv7410_state *s)
 {
   uint32_t header;
   uint32_t footer;
@@ -124,11 +124,6 @@ void poll_footer(int spifd, struct ncv7410_state *s)
   header |= (!get_parity(header) << DTPH_P_POS);
   header = htobe32(header);
   *((uint32_t *) txbuf) = header;
-  /* for (int i = 0; i < 8; i++) */
-  /*   { */
-  /*     printf("0x%02x ", txbuf[i]); */
-  /*   } */
-  /* printf("\n"); */
 
   prep_spi_seq(&seq, &trans, txbuf, rxbuf, CHUNK_DEFAULT_SIZE);
   ioctl(spifd, SPIIOC_TRANSFER, (unsigned long)((uintptr_t)&seq));
@@ -141,6 +136,7 @@ void poll_footer(int spifd, struct ncv7410_state *s)
   s->hdrb = (footer & DTPF_HDRB_MASK) >> DTPF_HDRB_POS;
   s->exst = (footer & DTPF_EXST_MASK) >> DTPF_EXST_POS;
   s->sync = (footer & DTPF_SYNC_MASK) >> DTPF_SYNC_POS;
+  return footer;
 }
 
 uint32_t read_chunk(int spifd, struct ncv7410_state *s, uint8_t *rxbuf)
@@ -184,33 +180,42 @@ void write_chunk(void)
 static void reset(int fd)
 {
   // reset
-  uint32_t regval = 0x00000001;
+  uint32_t regval = (1 << RESET_SWRESET_POS);
   if (write_reg(fd, RESET_MMS, RESET_ADDR, regval)) printf("error writing\n");
 }
 
 static void init(int *fd)
 {
   uint32_t regval;
-  int tries;
+  /* int tries; */
   int spifd;
 
   spifd = open(SPI_DRIVER_PATH, O_RDONLY);
 
   // reset
-  regval = 0x00000001;
+  regval = (1 << RESET_SWRESET_POS);
   if (write_reg(spifd, RESET_MMS, RESET_ADDR, regval)) printf("error writing\n");
 
-  tries = N_TRIES;
-  do
+  /* tries = N_TRIES; */
+  usleep(1000000);
+  /* do */
+  /*   { */
+  /*     if (read_reg(spifd, RESET_MMS, RESET_ADDR, &regval)) printf("erorr: "); */
+  /*   } */
+  /* while (tries-- && (regval & 1)); */
+  /* if (regval & 1) */
+  /*   { */
+  /*     printf("reset unsuccessful\n"); */
+  /*     *fd = -1; */
+  /*     return; */
+  /*   } */
+  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
     {
-      if (read_reg(spifd, RESET_MMS, RESET_ADDR, &regval)) printf("erorr: ");
+      printf("error reading status0\n");
     }
-  while (tries-- && (regval & 1));
-  if (regval & 1)
+  if (regval & STATUS0_HDRE_MASK)
     {
-      printf("reset unsuccessful\n");
-      *fd = -1;
-      return;
+      printf("HDRBE after restart\n");
     }
 
   // blink with dio0 and dio1 in counterphase
@@ -223,20 +228,52 @@ static void init(int *fd)
       if (write_reg(spifd, DIO_CONFIG_REG_MMS, DIO_CONFIG_REG_ADDR, regval)) printf("error writing\n");
       usleep(250000);
     }
+  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
+    {
+      printf("error reading status0\n");
+    }
+  if (regval & STATUS0_HDRE_MASK)
+    {
+      printf("HDRBE after blink\n");
+    }
 
   // setup LEDs
   regval =   (DIO_TXRX_FUNC << DIO0_FUNC_POS)   | (1 << DIO0_OUT_VAL_POS) \
            | (DIO_SFD_TXRX_FUNC << DIO1_FUNC_POS) | (1 << DIO1_OUT_VAL_POS);
            /* | (DIO_LINK_CTRL_FUNC << DIO1_FUNC_POS) | (1 << DIO1_OUT_VAL_POS); */
   if (write_reg(spifd, DIO_CONFIG_REG_MMS, DIO_CONFIG_REG_ADDR, regval)) printf("error writing\n");
+  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
+    {
+      printf("error reading status0\n");
+    }
+  if (regval & STATUS0_HDRE_MASK)
+    {
+      printf("HDRBE after LED setup\n");
+    }
 
   // setup and enable MAC
   regval = (1 << MAC_CONTROL0_FCSA_POS) | (1 << MAC_CONTROL0_TXEN_POS) | (1 << MAC_CONTROL0_RXEN_POS);
   if (write_reg(spifd, MAC_CONTROL0_REG_MMS, MAC_CONTROL0_REG_ADDR, regval)) printf("error writing\n");
+  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
+    {
+      printf("error reading status0\n");
+    }
+  if (regval & STATUS0_HDRE_MASK)
+    {
+      printf("HDRBE after MAC enable\n");
+    }
 
   // enable PHY
   regval = (1 << PHY_CONTROL_LCTL_POS);
   if (write_reg(spifd, PHY_CONTROL_REG_MMS, PHY_CONTROL_REG_ADDR, regval)) printf("error writing\n");
+  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
+    {
+      printf("error reading status0\n");
+    }
+  if (regval & STATUS0_HDRE_MASK)
+    {
+      printf("HDRBE after PHY enable\n");
+    }
 
 
   // setup SPI protocol and enable (see page 63 of datasheet)
@@ -244,6 +281,14 @@ static void init(int *fd)
   regval &= ~(CONFIG0_CPS_MASK);     // clear Chunk Payload Size
   regval |= (5 << CONFIG0_CPS_POS);  // set Chunk Payload Size to 2^5 = 32
   if (write_reg(spifd, CONFIG0_MMS, CONFIG0_ADDR, regval)) printf("error writing\n");
+  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
+    {
+      printf("error reading status0\n");
+    }
+  if (regval & STATUS0_HDRE_MASK)
+    {
+      printf("HDRBE after init\n");
+    }
   *fd = spifd;
   return;
 }
@@ -255,16 +300,30 @@ int main(int argc, FAR char *argv[])
   struct ncv7410_state s = { 0 };
   init(&fd);
 
+  if (read_reg(fd, STATUS0_MMS, STATUS0_ADDR, &reg))
+    {
+      printf("error reading status0\n");
+    }
+  if (reg & STATUS0_HDRE_MASK)
+    {
+      printf("resetting status0 HDRBE\n");
+      if (write_reg(fd, STATUS0_MMS, STATUS0_ADDR, (1 << STATUS0_HDRE_POS)))
+        {
+          printf("error resetting status0 HDRBE\n");
+        }
+    }
+
   // test read
-  if (read_reg(fd, 0x0, 0x0000, &reg)) printf("erorr: ");
+  if (read_reg(fd, IDVER_MMS, IDVER_ADDR, &reg)) printf("erorr: ");
   printf("SPI Identification Register, IDVER:  0x%08lx, MAJVER: %ld, MINVER: %ld\n",
          reg,
          (reg & (0xF << 4)) >> 4,
          reg & 0xF);
-  if (read_reg(fd, 0x0, 0x0001, &reg)) printf("error: ");
+  if (read_reg(fd, PHY_ID_MMS, PHY_ID_ADDR, &reg)) printf("error: ");
   printf("SPI Identification Register, PHY ID: 0x%08lx, MODEL: 0x%02lx, REV: %ld\n", reg,
          (reg & (0x3F << 4)) >> 4,
          reg & 0xF);
+
 
   while (1)
     {
@@ -287,12 +346,29 @@ int main(int argc, FAR char *argv[])
   while (1)
     {
       uint8_t rxbuf[CHUNK_DEFAULT_SIZE];  // provide whole (+4) buffer for now
-      poll_footer(fd, &s);
+      uint32_t f = poll_footer(fd, &s);
+      if (!get_parity(f))
+        {
+          printf("bad parity in footer\n");
+        }
+      if (f & DTPF_HDRB_MASK)
+        {
+          printf("HDRB flag in footer\n");
+        }
+
 
       char cmd = '\0';
       while (s.rca)
         {
-          uint32_t f = read_chunk(fd, &s, rxbuf);
+          f = read_chunk(fd, &s, rxbuf);
+          if (!get_parity(f))
+            {
+              printf("bad parity in footer\n");
+            }
+          if (f & DTPF_HDRB_MASK)
+            {
+              printf("HDRB flag in footer\n");
+            }
           for (int i = 0; i < CHUNK_DEFAULT_PAYLOAD_SIZE; i++)
             {
               printf("%02x ", rxbuf[i]);
@@ -300,7 +376,7 @@ int main(int argc, FAR char *argv[])
           printf("\n");
           for (int i = 0; i < CHUNK_DEFAULT_PAYLOAD_SIZE; i++)
             {
-              printf("%c ", rxbuf[i]);
+              printf("%c", rxbuf[i]);
             }
           printf("\nChunk available to read: %d\nChunks available to write: %d\n", s.rca, s.txc);
           printf("0x%08lx\n", f);  // print footer
