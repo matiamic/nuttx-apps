@@ -187,7 +187,7 @@ static void reset(int fd)
 static void init(int *fd)
 {
   uint32_t regval;
-  /* int tries; */
+  int tries;
   int spifd;
 
   spifd = open(SPI_DRIVER_PATH, O_RDONLY);
@@ -196,26 +196,23 @@ static void init(int *fd)
   regval = (1 << RESET_SWRESET_POS);
   if (write_reg(spifd, RESET_MMS, RESET_ADDR, regval)) printf("error writing\n");
 
-  /* tries = N_TRIES; */
-  usleep(1000000);
-  /* do */
-  /*   { */
-  /*     if (read_reg(spifd, RESET_MMS, RESET_ADDR, &regval)) printf("erorr: "); */
-  /*   } */
-  /* while (tries-- && (regval & 1)); */
-  /* if (regval & 1) */
-  /*   { */
-  /*     printf("reset unsuccessful\n"); */
-  /*     *fd = -1; */
-  /*     return; */
-  /*   } */
-  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
+  tries = N_TRIES;
+  do
     {
-      printf("error reading status0\n");
+      if (read_reg(spifd, RESET_MMS, RESET_ADDR, &regval)) printf("erorr: ");
     }
-  if (regval & STATUS0_HDRE_MASK)
+  while (tries-- && (regval & 1));
+  if (regval & 1)
     {
-      printf("HDRBE after restart\n");
+      printf("reset unsuccessful\n");
+      *fd = -1;
+      return;
+    }
+
+  // for some reason HDRB is sometimes set right after restart -> clear it
+  if (write_reg(spifd, STATUS0_MMS, STATUS0_ADDR, (1 << STATUS0_HDRE_POS)))
+    {
+      printf("error resetting HDRBE in STATUS0\n");
     }
 
   // blink with dio0 and dio1 in counterphase
@@ -228,52 +225,20 @@ static void init(int *fd)
       if (write_reg(spifd, DIO_CONFIG_REG_MMS, DIO_CONFIG_REG_ADDR, regval)) printf("error writing\n");
       usleep(250000);
     }
-  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
-    {
-      printf("error reading status0\n");
-    }
-  if (regval & STATUS0_HDRE_MASK)
-    {
-      printf("HDRBE after blink\n");
-    }
 
   // setup LEDs
   regval =   (DIO_TXRX_FUNC << DIO0_FUNC_POS)   | (1 << DIO0_OUT_VAL_POS) \
            | (DIO_SFD_TXRX_FUNC << DIO1_FUNC_POS) | (1 << DIO1_OUT_VAL_POS);
            /* | (DIO_LINK_CTRL_FUNC << DIO1_FUNC_POS) | (1 << DIO1_OUT_VAL_POS); */
   if (write_reg(spifd, DIO_CONFIG_REG_MMS, DIO_CONFIG_REG_ADDR, regval)) printf("error writing\n");
-  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
-    {
-      printf("error reading status0\n");
-    }
-  if (regval & STATUS0_HDRE_MASK)
-    {
-      printf("HDRBE after LED setup\n");
-    }
 
   // setup and enable MAC
   regval = (1 << MAC_CONTROL0_FCSA_POS) | (1 << MAC_CONTROL0_TXEN_POS) | (1 << MAC_CONTROL0_RXEN_POS);
   if (write_reg(spifd, MAC_CONTROL0_REG_MMS, MAC_CONTROL0_REG_ADDR, regval)) printf("error writing\n");
-  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
-    {
-      printf("error reading status0\n");
-    }
-  if (regval & STATUS0_HDRE_MASK)
-    {
-      printf("HDRBE after MAC enable\n");
-    }
 
   // enable PHY
   regval = (1 << PHY_CONTROL_LCTL_POS);
   if (write_reg(spifd, PHY_CONTROL_REG_MMS, PHY_CONTROL_REG_ADDR, regval)) printf("error writing\n");
-  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
-    {
-      printf("error reading status0\n");
-    }
-  if (regval & STATUS0_HDRE_MASK)
-    {
-      printf("HDRBE after PHY enable\n");
-    }
 
 
   // setup SPI protocol and enable (see page 63 of datasheet)
@@ -281,16 +246,46 @@ static void init(int *fd)
   regval &= ~(CONFIG0_CPS_MASK);     // clear Chunk Payload Size
   regval |= (5 << CONFIG0_CPS_POS);  // set Chunk Payload Size to 2^5 = 32
   if (write_reg(spifd, CONFIG0_MMS, CONFIG0_ADDR, regval)) printf("error writing\n");
-  if (read_reg(spifd, STATUS0_MMS, STATUS0_ADDR, &regval))
-    {
-      printf("error reading status0\n");
-    }
-  if (regval & STATUS0_HDRE_MASK)
-    {
-      printf("HDRBE after init\n");
-    }
   *fd = spifd;
   return;
+}
+
+void print_frame(uint8_t *frame, int len, int frame_num)
+{
+#define HEX_LINE_LEN 64
+#define ASCII_LINE_LEN (3 * HEX_LINE_LEN)
+  printf("Frame %04d (%d B) hex:\n", frame_num, len);
+  for (int i = 0; i < (len + HEX_LINE_LEN - 1) / HEX_LINE_LEN; i++)
+    {
+      for (int j = 0; j < HEX_LINE_LEN; j++)
+        {
+          int idx = HEX_LINE_LEN * i + j;
+          if (idx >= len) break;
+          printf("%02x ", frame[idx]);
+        }
+      printf("\n");
+    }
+  printf("\n");
+
+  printf("Frame %04d (%d B) ASCII:\n", frame_num, len);
+  for (int i = 0; i < (len + ASCII_LINE_LEN - 1) / ASCII_LINE_LEN; i++)
+    {
+      for (int j = 0; j < ASCII_LINE_LEN; j++)
+        {
+          int idx = ASCII_LINE_LEN * i + j;
+          if (idx >= len) break;
+          if (32 <= frame[idx] && frame[idx] <= 126)  // printable range
+            {
+              printf("%c", frame[idx]);
+            }
+          else
+            {
+              printf(".");
+            }
+        }
+      printf("\n");
+    }
+  printf("\n\n");
 }
 
 int main(int argc, FAR char *argv[])
@@ -298,20 +293,8 @@ int main(int argc, FAR char *argv[])
   int fd;
   uint32_t reg;
   struct ncv7410_state s = { 0 };
+  char cmd = '\0';
   init(&fd);
-
-  if (read_reg(fd, STATUS0_MMS, STATUS0_ADDR, &reg))
-    {
-      printf("error reading status0\n");
-    }
-  if (reg & STATUS0_HDRE_MASK)
-    {
-      printf("resetting status0 HDRBE\n");
-      if (write_reg(fd, STATUS0_MMS, STATUS0_ADDR, (1 << STATUS0_HDRE_POS)))
-        {
-          printf("error resetting status0 HDRBE\n");
-        }
-    }
 
   // test read
   if (read_reg(fd, IDVER_MMS, IDVER_ADDR, &reg)) printf("erorr: ");
@@ -324,12 +307,8 @@ int main(int argc, FAR char *argv[])
          (reg & (0x3F << 4)) >> 4,
          reg & 0xF);
 
-
   while (1)
     {
-      char cmd = getchar();
-      if (cmd == 'q') break;
-      if (cmd == 'r') reset(fd);
       if (read_reg(fd, STATUS0_MMS, STATUS0_ADDR, &reg)) printf("error: ");
       printf("STATUS0 register:       0x%08lx\n", reg);
       if (read_reg(fd, CONFIG0_MMS, CONFIG0_ADDR, &reg)) printf("error: ");
@@ -342,51 +321,104 @@ int main(int argc, FAR char *argv[])
       printf("PHY STATUS register:    0x%08lx\n", reg);
       poll_footer(fd, &s);
       printf("Chunk available to read: %d\nChunks available to write: %d\n", s.rca, s.txc);
+      cmd = getchar();
+      if (cmd == 'q') break;
+      if (cmd == 'r') reset(fd);
     }
+#define MAX_FRAME_SIZE 1024
+  uint8_t rxbuf[CHUNK_DEFAULT_SIZE];  // provide whole (+4) buffer for now
+  uint8_t frame[MAX_FRAME_SIZE];
+  int frame_idx = 0;
+  int in_frame = 0;
+  int size_in_chunk = 0;
+  int frame_num = 0;
+  int end = 0;
+  uint32_t f;
   while (1)
     {
-      uint8_t rxbuf[CHUNK_DEFAULT_SIZE];  // provide whole (+4) buffer for now
-      uint32_t f = poll_footer(fd, &s);
+      f = poll_footer(fd, &s);
       if (!get_parity(f))
         {
-          printf("bad parity in footer\n");
+          printf("poll footer: footer has bad parity\n");
+          return 1;
         }
       if (f & DTPF_HDRB_MASK)
         {
           printf("HDRB flag in footer\n");
+          return 1;
         }
 
-
-      char cmd = '\0';
       while (s.rca)
         {
           f = read_chunk(fd, &s, rxbuf);
           if (!get_parity(f))
             {
-              printf("bad parity in footer\n");
+              printf("read chunk: footer has bad parity\n");
+              return 1;
             }
-          if (f & DTPF_HDRB_MASK)
+          if (f & DTPF_FD_MASK)  // frame drop
             {
-              printf("HDRB flag in footer\n");
+              frame_idx = 0;
+              in_frame = 0;
+              break;
             }
-          for (int i = 0; i < CHUNK_DEFAULT_PAYLOAD_SIZE; i++)
+          if (!(f & DTPF_DV_MASK)) // not valid data
             {
-              printf("%02x ", rxbuf[i]);
+              continue;
             }
-          printf("\n");
-          for (int i = 0; i < CHUNK_DEFAULT_PAYLOAD_SIZE; i++)
+
+
+          if (f & DTPF_SV_MASK)  // start valid
             {
-              printf("%c", rxbuf[i]);
+              if (! in_frame)
+                {
+                  in_frame = 1;
+                }
+              else
+                {  // drop the frame start came before end
+                  frame_idx = 0;
+                  in_frame = 0;
+                  break;
+                }
             }
-          printf("\nChunk available to read: %d\nChunks available to write: %d\n", s.rca, s.txc);
-          printf("0x%08lx\n", f);  // print footer
-          if (read_reg(fd, STATUS0_MMS, STATUS0_ADDR, &reg)) printf("error: ");
-          printf("STATUS0 register:       0x%08lx\n", reg);
-          cmd = getchar();
-          if (cmd == 'q') break;
+          if (f & DTPF_EV_MASK)  // end valid
+            {
+              if (in_frame)  // ok -> finish the frame
+                {
+                  size_in_chunk = ((f & DTPF_EBO_MASK) >> DTPF_EBO_POS) + 1;
+                  end = 1;
+                }
+              else // drop
+                {
+                  continue;
+                }
+            }
+          else
+            {
+              size_in_chunk = CHUNK_DEFAULT_PAYLOAD_SIZE;
+            }
+
+          // right here I have valid data and initialized size_in_chunk
+          if (! in_frame)  // drop
+            {
+              continue;
+            }
+
+          // right here I have valid data and initialized size_in_chunk and I am in frame
+          for (int i = 0; i < size_in_chunk; i++)
+            {
+              frame[frame_idx++] = rxbuf[i];
+            }
+          if (end)
+            {
+              print_frame(frame, frame_idx, frame_num);
+
+              end = 0;
+              frame_idx = 0;
+              in_frame = 0;
+              frame_num++;
+            }
         }
-      if (cmd == 'q') break;
-      usleep(100000); // 100 ms
     }
   close(fd);
   return 0;
