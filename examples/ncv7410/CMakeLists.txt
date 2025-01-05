@@ -27,6 +27,5 @@ if(CONFIG_EXAMPLES_NCV7410)
     PRIORITY
     ${CONFIG_EXAMPLES_NCV7410_PRIORITY}
     SRCS
-    ncv7410_main.c
-    oa_tc6_control_transaction_protocol.c)
+    ncv7410_main.c)
 endif()

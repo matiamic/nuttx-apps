@@ -22,7 +22,7 @@ include $(APPDIR)/Make.defs
 
 # NCV7410 demo
 
-CSRCS   = oa_tc6_control_transaction_protocol.c
+# CSRCS   = 
 MAINSRC = ncv7410_main.c
 
 PROGNAME  = $(CONFIG_EXAMPLES_NCV7410_PROGNAME)
