@@ -14,8 +14,8 @@ struct ncv7410_state
 /* NuttX SPI mode number for spi config as defined in OpenAlliance TC6 */
 #define OA_TC6_SPI_MODE 0
 
-/* #define CHUNK_DEFAULT_PAYLOAD_SIZE 64 */
-#define CHUNK_DEFAULT_PAYLOAD_SIZE 32
+#define CHUNK_DEFAULT_PAYLOAD_SIZE 64
+/* #define CHUNK_DEFAULT_PAYLOAD_SIZE 32 */
 #define CHUNK_DEFAULT_SIZE (CHUNK_DEFAULT_PAYLOAD_SIZE + 4)
 
 /* #define SPI_FREQ 20000000 */

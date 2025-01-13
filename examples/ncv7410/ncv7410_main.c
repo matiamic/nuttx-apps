@@ -243,8 +243,8 @@ static void init(int *fd)
 
   // setup SPI protocol and enable (see page 63 of datasheet)
   regval = 0x0000BC06;
-  regval &= ~(CONFIG0_CPS_MASK);     // clear Chunk Payload Size
-  regval |= (5 << CONFIG0_CPS_POS);  // set Chunk Payload Size to 2^5 = 32
+  /* regval &= ~(CONFIG0_CPS_MASK);     // clear Chunk Payload Size */
+  /* regval |= (5 << CONFIG0_CPS_POS);  // set Chunk Payload Size to 2^5 = 32 */
   if (write_reg(spifd, CONFIG0_MMS, CONFIG0_ADDR, regval)) printf("error writing\n");
   *fd = spifd;
   return;
