@@ -6,6 +6,11 @@
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
 
+#include <termios.h>
+
+#include <sched.h>
+#include <pthread.h>
+
 #include <sys/endian.h>
 
 #include "ncv7410.h"
@@ -13,6 +18,8 @@
 #define SPI_DRIVER_PATH "/dev/spi2"
 
 #define N_TRIES 4  // arbitrary
+
+#define MAX_FRAME_SIZE 1024
 
 static int get_parity(uint32_t w)
 {
@@ -184,7 +191,7 @@ static void reset(int fd)
   if (write_reg(fd, RESET_MMS, RESET_ADDR, regval)) printf("error writing\n");
 }
 
-static void init(int *fd)
+static void mac_phy_init(int *fd)
 {
   uint32_t regval;
   int tries;
@@ -254,7 +261,7 @@ void print_frame(uint8_t *frame, int len, int frame_num)
 {
 #define HEX_LINE_LEN 64
 #define ASCII_LINE_LEN (3 * HEX_LINE_LEN)
-  printf("Frame %04d (%d B) hex:\n", frame_num, len);
+  printf("Frame %04d (%d B) hex:\n\r", frame_num, len);
   for (int i = 0; i < (len + HEX_LINE_LEN - 1) / HEX_LINE_LEN; i++)
     {
       for (int j = 0; j < HEX_LINE_LEN; j++)
@@ -263,11 +270,11 @@ void print_frame(uint8_t *frame, int len, int frame_num)
           if (idx >= len) break;
           printf("%02x ", frame[idx]);
         }
-      printf("\n");
+      printf("\n\r");
     }
-  printf("\n");
+  printf("\n\r");
 
-  printf("Frame %04d (%d B) ASCII:\n", frame_num, len);
+  printf("Frame %04d (%d B) ASCII:\n\r", frame_num, len);
   for (int i = 0; i < (len + ASCII_LINE_LEN - 1) / ASCII_LINE_LEN; i++)
     {
       for (int j = 0; j < ASCII_LINE_LEN; j++)
@@ -283,18 +290,249 @@ void print_frame(uint8_t *frame, int len, int frame_num)
               printf(".");
             }
         }
-      printf("\n");
+      printf("\n\r");
     }
-  printf("\n\n");
+  printf("\n\n\r");
+}
+
+struct frame_buffer
+{
+  uint8_t data[MAX_FRAME_SIZE];
+  int idx;
+};
+
+struct rxtxbuffer
+{
+  uint8_t rxdata[MAX_FRAME_SIZE];
+  int rxlen;
+  int rx_new;
+  int rx_frame_num;
+
+  uint8_t txdata[MAX_FRAME_SIZE];
+  int txlen;
+  int tx_new;
+};
+
+void rxtxbuffer_init(struct rxtxbuffer *b)
+{
+  struct rxtxbuffer aux = { 0 };
+  *b = aux;
+}
+
+static struct rxtxbuffer rxtxbuf = { 0 };
+static pthread_mutex_t mtx;
+static int end; // termination flag
+
+int mac_phy_task(int argc, char *argv[])
+{
+  /* struct frame_buffer txbuf = { 0 }; */
+  struct frame_buffer rxbuf = { 0 };
+
+  struct ncv7410_state s = { 0 };
+  uint32_t f;
+  int in_frame = 0;
+  int frame_end = 0;
+  int size_in_chunk = 0;
+  int frame_num = 0;
+  uint8_t chunkbuf[CHUNK_DEFAULT_SIZE];
+
+  int fd;
+  mac_phy_init(&fd);
+  /* while (1) */
+  /*   { */
+  /*     pthread_mutex_lock(&mtx); */
+  /*     for (int i = 'a'; i <= 'z'; i++) */
+  /*       { */
+  /*         rxtxbuf.rxdata[i - 'a'] = i; */
+  /*       } */
+  /*     rxtxbuf.rxlen = 'z' - 'a' + 1; */
+  /*     rxtxbuf.rx_new = 1; */
+  /*     rxtxbuf.rx_frame_num++; */
+  /*     pthread_mutex_unlock(&mtx); */
+  /*     usleep(1000000); */
+  /*   } */
+
+  while (1)
+    {
+      // check termination condition
+      pthread_mutex_lock(&mtx);
+      if (end)
+        {
+          pthread_mutex_unlock(&mtx);
+          break;
+        }
+      pthread_mutex_unlock(&mtx);
+
+      f = poll_footer(fd, &s);
+      if (!get_parity(f))
+        {
+          printf("poll footer: footer has bad parity\n\r");
+          return 1;
+        }
+      if (f & DTPF_HDRB_MASK)
+        {
+          printf("HDRB flag in footer\n\r");
+          return 1;
+        }
+
+      while (s.rca)
+        {
+          f = read_chunk(fd, &s, chunkbuf);
+          if (!get_parity(f))
+            {
+              printf("read chunk: footer has bad parity\n\r");
+              return 1;
+            }
+          if (f & DTPF_FD_MASK)  // frame drop
+            {
+              rxbuf.idx = 0;
+              in_frame = 0;
+              break;
+            }
+          if (!(f & DTPF_DV_MASK)) // not valid data
+            {
+              continue;
+            }
+
+
+          if (f & DTPF_SV_MASK)  // start valid
+            {
+              if (! in_frame)
+                {
+                  in_frame = 1;
+                }
+              else
+                {  // drop the frame start came before end
+                  rxbuf.idx = 0;
+                  in_frame = 0;
+                  break;
+                }
+            }
+          if (f & DTPF_EV_MASK)  // end valid
+            {
+              if (in_frame)  // ok -> finish the frame
+                {
+                  size_in_chunk = ((f & DTPF_EBO_MASK) >> DTPF_EBO_POS) + 1;
+                  frame_end = 1;
+                }
+              else // drop
+                {
+                  continue;
+                }
+            }
+          else
+            {
+              size_in_chunk = CHUNK_DEFAULT_PAYLOAD_SIZE;
+            }
+
+          // right here I have valid data and initialized size_in_chunk
+          if (! in_frame)  // drop
+            {
+              continue;
+            }
+
+          // right here I have valid data and initialized size_in_chunk and I am in frame
+          for (int i = 0; i < size_in_chunk; i++)
+            {
+              rxbuf.data[rxbuf.idx++] = chunkbuf[i];
+            }
+          if (frame_end)
+            {
+              pthread_mutex_lock(&mtx);
+              for (int i = 0; i < rxbuf.idx; i++)
+                {
+                  rxtxbuf.rxdata[i] = rxbuf.data[i];
+                }
+              rxtxbuf.rxlen = rxbuf.idx;
+              rxtxbuf.rx_new = 1;
+              rxtxbuf.rx_frame_num = frame_num++;
+              pthread_mutex_unlock(&mtx);
+
+              frame_end = 0;
+              in_frame = 0;
+              rxbuf.idx = 0;
+            }
+        }
+    }
+  close(fd);
+  return 0;
+}
+
+void termios_set_raw(struct termios *old)
+{
+  struct termios t;
+  tcgetattr(STDIN_FILENO, old);
+  t = *old;
+  cfmakeraw(&t);
+  t.c_cc[VMIN] = 0;
+  t.c_cc[VTIME] = 1;
+  tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
 }
 
 int main(int argc, FAR char *argv[])
 {
+  // reinitialize global variables
+  rxtxbuffer_init(&rxtxbuf);
+  pthread_mutex_init(&mtx, NULL);
+  end = 0;
+
+  task_create("mac-phy-task", 100, 16384, mac_phy_task, NULL);
+
+  struct termios termios_bak;
+  termios_set_raw(&termios_bak);
+  int c = 0;
+  while (c != 'q')
+    {
+      // gather input
+      /* int r = read(STDIN_FILENO, &c, 1); */
+      read(STDIN_FILENO, &c, 1);
+
+      pthread_mutex_lock(&mtx);
+      if (rxtxbuf.rx_new)
+        {
+          rxtxbuf.rx_new = 0;
+          print_frame(rxtxbuf.rxdata, rxtxbuf.rxlen, rxtxbuf.rx_frame_num);
+        }
+      pthread_mutex_unlock(&mtx);
+    }
+  pthread_mutex_lock(&mtx);
+  end = 1;
+  pthread_mutex_unlock(&mtx);
+
+  // restore
+  tcsetattr(STDIN_FILENO, TCSAFLUSH, &termios_bak);
+  return 0;
+
+  struct termios t, old;
+  tcgetattr(STDIN_FILENO, &old);
+
+  t = old;
+  cfmakeraw(&t);
+  t.c_cc[VMIN] = 0;
+  t.c_cc[VTIME] = 1;
+  tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
+
+  /* int c = 0; */
+  while (c != 'q')
+    {
+      int r = read(STDIN_FILENO, &c, 1);
+      if (r == -1)
+        {
+          usleep(100000);
+        }
+      else
+        {
+          printf("%c\r\n", c);
+        }
+    }
+  tcsetattr(STDIN_FILENO, TCSAFLUSH, &old);
+  return 0;
+
   int fd;
   uint32_t reg;
   struct ncv7410_state s = { 0 };
   char cmd = '\0';
-  init(&fd);
+  mac_phy_init(&fd);
 
   // test read
   if (read_reg(fd, IDVER_MMS, IDVER_ADDR, &reg)) printf("erorr: ");
@@ -325,101 +563,5 @@ int main(int argc, FAR char *argv[])
       if (cmd == 'q') break;
       if (cmd == 'r') reset(fd);
     }
-#define MAX_FRAME_SIZE 1024
-  uint8_t rxbuf[CHUNK_DEFAULT_SIZE];  // provide whole (+4) buffer for now
-  uint8_t frame[MAX_FRAME_SIZE];
-  int frame_idx = 0;
-  int in_frame = 0;
-  int size_in_chunk = 0;
-  int frame_num = 0;
-  int end = 0;
-  uint32_t f;
-  while (1)
-    {
-      f = poll_footer(fd, &s);
-      if (!get_parity(f))
-        {
-          printf("poll footer: footer has bad parity\n");
-          return 1;
-        }
-      if (f & DTPF_HDRB_MASK)
-        {
-          printf("HDRB flag in footer\n");
-          return 1;
-        }
-
-      while (s.rca)
-        {
-          f = read_chunk(fd, &s, rxbuf);
-          if (!get_parity(f))
-            {
-              printf("read chunk: footer has bad parity\n");
-              return 1;
-            }
-          if (f & DTPF_FD_MASK)  // frame drop
-            {
-              frame_idx = 0;
-              in_frame = 0;
-              break;
-            }
-          if (!(f & DTPF_DV_MASK)) // not valid data
-            {
-              continue;
-            }
-
-
-          if (f & DTPF_SV_MASK)  // start valid
-            {
-              if (! in_frame)
-                {
-                  in_frame = 1;
-                }
-              else
-                {  // drop the frame start came before end
-                  frame_idx = 0;
-                  in_frame = 0;
-                  break;
-                }
-            }
-          if (f & DTPF_EV_MASK)  // end valid
-            {
-              if (in_frame)  // ok -> finish the frame
-                {
-                  size_in_chunk = ((f & DTPF_EBO_MASK) >> DTPF_EBO_POS) + 1;
-                  end = 1;
-                }
-              else // drop
-                {
-                  continue;
-                }
-            }
-          else
-            {
-              size_in_chunk = CHUNK_DEFAULT_PAYLOAD_SIZE;
-            }
-
-          // right here I have valid data and initialized size_in_chunk
-          if (! in_frame)  // drop
-            {
-              continue;
-            }
-
-          // right here I have valid data and initialized size_in_chunk and I am in frame
-          for (int i = 0; i < size_in_chunk; i++)
-            {
-              frame[frame_idx++] = rxbuf[i];
-            }
-          if (end)
-            {
-              print_frame(frame, frame_idx, frame_num);
-
-              end = 0;
-              frame_idx = 0;
-              in_frame = 0;
-              frame_num++;
-            }
-        }
-    }
-  close(fd);
   return 0;
 }
