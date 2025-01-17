@@ -45,6 +45,8 @@ struct ncv7410_state
 #define STATUS0_MMS              0
 #define STATUS0_HDRE_MASK        BIT(5)
 #define STATUS0_HDRE_POS         5
+#define STATUS0_RESETC_MASK      BIT(6)
+#define STATUS0_RESETC_POS       6
 
 #define BUFSTS_ADDR              0xBU
 #define BUFSTS_MMS               0
@@ -159,3 +161,68 @@ struct ncv7410_state
 #define DTPF_TXC_POS   1
 #define DTPF_P_MASK    BIT(0)
 #define DTPF_P_POS     0
+
+static inline int tx_credits(uint32_t footer)
+{
+  return (footer & DTPF_TXC_MASK) >> DTPF_TXC_POS;
+}
+
+static inline int rx_available(uint32_t footer)
+{
+  return (footer & DTPF_RCA_MASK) >> DTPF_RCA_POS;
+}
+
+static inline int header_bad(uint32_t footer)
+{
+  return (footer & DTPF_HDRB_MASK) >> DTPF_HDRB_POS;
+}
+
+static inline int ext_status(uint32_t footer)
+{
+  return (footer & DTPF_EXST_MASK) >> DTPF_EXST_POS;
+}
+
+static inline int data_valid(uint32_t footer)
+{
+  return (footer & DTPF_DV_MASK) >> DTPF_DV_POS;
+}
+
+static inline int start_valid(uint32_t footer)
+{
+  return (footer & DTPF_SV_MASK) >> DTPF_SV_POS;
+}
+
+static inline int start_word_offset(uint32_t footer)
+{
+  return (footer & DTPF_SWO_MASK) >> DTPF_SWO_POS;
+}
+
+static inline int end_valid(uint32_t footer)
+{
+  return (footer & DTPF_EV_MASK) >> DTPF_EV_POS;
+}
+
+static inline int end_byte_offset(uint32_t footer)
+{
+  return (footer & DTPF_EBO_MASK) >> DTPF_EBO_POS;
+}
+
+static inline int frame_drop(uint32_t footer)
+{
+  return (footer & DTPF_FD_MASK) >> DTPF_FD_POS;
+}
+
+static inline int rx_frame_timestamp_added(uint32_t footer)
+{
+  return (footer & DTPF_RTSA_MASK) >> DTPF_RTSA_POS;
+}
+
+static inline int rx_frame_timestamp_parity(uint32_t footer)
+{
+  return (footer & DTPF_RTSP_MASK) >> DTPF_RTSP_POS;
+}
+
+static inline int mac_phy_sync(uint32_t footer)
+{
+  return (footer & DTPF_SYNC_MASK) >> DTPF_SYNC_POS;
+}

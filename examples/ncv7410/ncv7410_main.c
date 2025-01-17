@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -20,6 +21,33 @@
 #define N_TRIES 4  // arbitrary
 
 #define MAX_FRAME_SIZE 1024
+
+#define WRITE_MODE_CHAR 'w'
+
+struct frame_buffer
+{
+  uint8_t data[MAX_FRAME_SIZE];
+  int idx;
+  int len;
+};
+
+struct rxtxbuffer
+{
+  uint8_t rxdata[MAX_FRAME_SIZE];
+  int rxlen;
+  int rx_new;
+  int rx_frame_num;
+
+  uint8_t txdata[MAX_FRAME_SIZE];
+  int txlen;
+  int tx_new;
+};
+
+void rxtxbuffer_init(struct rxtxbuffer *b)
+{
+  struct rxtxbuffer aux = { 0 };
+  *b = aux;
+}
 
 static int get_parity(uint32_t w)
 {
@@ -50,6 +78,42 @@ static void prep_spi_seq(struct spi_sequence_s *seq,
   trans->nwords = len;
   trans->txbuffer = txdata;
   trans->rxbuffer = rxdata;
+}
+
+static void prep_spi_seq_hf(struct spi_sequence_s *seq,
+                            struct spi_trans_s *trans,
+                            uint8_t *txdata,
+                            uint8_t *rxdata,
+                            uint32_t *header,
+                            uint32_t *footer,
+                            int payload_len)
+{
+  // prepare transaction
+  seq->dev = SPIDEV_ID(SPIDEVTYPE_USER, 0);
+  seq->mode = OA_TC6_SPI_MODE;
+  seq->nbits = 8;
+  seq->frequency = SPI_FREQ;
+  seq->ntrans = 3;
+  seq->trans = trans;
+
+  trans[0].deselect = false;
+  trans[0].delay = 0;
+  trans[1].deselect = false;
+  trans[1].delay = 0;
+  trans[2].deselect = false;
+  trans[2].delay = 0;
+
+  trans[0].nwords = 4;
+  trans[0].txbuffer = header;
+  trans[0].rxbuffer = &rxdata[0];
+
+  trans[1].nwords = payload_len - 4;
+  trans[1].txbuffer = &txdata[0];
+  trans[1].rxbuffer = &rxdata[4];
+
+  trans[2].nwords = 4;
+  trans[2].txbuffer = &txdata[payload_len - 4];
+  trans[2].rxbuffer = footer;
 }
 
 static void prep_spi_seq32(struct spi_sequence_s *seq,
@@ -114,7 +178,7 @@ int write_reg(int spifd, uint8_t mms, uint16_t addr, uint32_t reg)
   return 0;
 }
 
-uint32_t poll_footer(int spifd, struct ncv7410_state *s)
+uint32_t poll_footer(int spifd)
 {
   uint32_t header;
   uint32_t footer;
@@ -138,11 +202,6 @@ uint32_t poll_footer(int spifd, struct ncv7410_state *s)
   // CHUNK_DEFAULT_PAYLOAD_SIZE is the actual index of the footer
   footer = *((uint32_t *) (&rxbuf[CHUNK_DEFAULT_PAYLOAD_SIZE]));
   footer = be32toh(footer);
-  s->txc  = (footer & DTPF_TXC_MASK)  >> DTPF_TXC_POS;
-  s->rca  = (footer & DTPF_RCA_MASK)  >> DTPF_RCA_POS;
-  s->hdrb = (footer & DTPF_HDRB_MASK) >> DTPF_HDRB_POS;
-  s->exst = (footer & DTPF_EXST_MASK) >> DTPF_EXST_POS;
-  s->sync = (footer & DTPF_SYNC_MASK) >> DTPF_SYNC_POS;
   return footer;
 }
 
@@ -184,6 +243,89 @@ void write_chunk(void)
 
 }
 
+uint32_t exchange_chunk(int spifd, struct frame_buffer *rxbuf, struct frame_buffer *txbuf)
+{
+  struct spi_trans_s trans[3];
+  struct spi_sequence_s seq;
+
+  uint32_t header = (1 << DTPH_DNC_POS);
+  uint32_t footer = 0;
+  int writelen = 0;
+  if (txbuf->idx != txbuf->len)
+    {
+      header |= (1 << DTPH_DV_POS);
+      if (txbuf->idx == 0)
+        {
+          header |= (1 << DTPH_SV_POS);
+          header |= (0 << DTPH_SWO_POS);
+        }
+      writelen = txbuf->len - txbuf->idx;
+      if (writelen <= CHUNK_DEFAULT_PAYLOAD_SIZE)
+        {
+          header |= (1 << DTPH_EV_POS);
+          header |= ((writelen - 1) << DTPH_EBO_POS);
+        }
+      else
+        {
+          writelen = CHUNK_DEFAULT_PAYLOAD_SIZE;  // saturate writelen
+        }
+    }
+  header |= (!get_parity(header) << DTPH_P_POS);
+  header = htobe32(header);
+
+  prep_spi_seq_hf(&seq, trans,
+                  &txbuf->data[txbuf->idx],
+                  &rxbuf->data[rxbuf->idx],
+                  &header, &footer,
+                  CHUNK_DEFAULT_PAYLOAD_SIZE);
+  ioctl(spifd, SPIIOC_TRANSFER, (unsigned long)((uintptr_t)&seq));
+  txbuf->idx += writelen;
+  footer = be32toh(footer);
+
+  if (!get_parity(footer)) return footer;
+
+  if (header_bad(footer))
+    {
+      printf("Bad header reported by a footer\r\n");
+    }
+
+  if (ext_status(footer))
+    {
+      printf("Extended status reported by a footer\r\n");
+    }
+
+  // decide what to do with the received chunk
+
+  // ignore data (don't move rxbuf's idx) if:
+  if (!data_valid(footer)) return footer;
+  if (rxbuf->idx == 0 && !start_valid(footer)) return footer;
+
+  if (end_valid(footer))
+    {
+      if (frame_drop(footer))
+        {
+          rxbuf->idx = 0;
+        }
+      else
+        {
+          rxbuf->idx += end_byte_offset(footer) + 1;
+          rxbuf->len = rxbuf->idx;
+        }
+    }
+  else
+    {
+      rxbuf->idx += CHUNK_DEFAULT_PAYLOAD_SIZE;
+    }
+
+  if (start_valid(footer))
+  // ignore SWO, MAC-PHY set to start frame always on a chunk start
+  // later it will be needed to shift the rxbuf data to the left accordingly
+    {
+    }
+
+  return footer;
+}
+
 static void reset(int fd)
 {
   // reset
@@ -220,6 +362,11 @@ static void mac_phy_init(int *fd)
   if (write_reg(spifd, STATUS0_MMS, STATUS0_ADDR, (1 << STATUS0_HDRE_POS)))
     {
       printf("error resetting HDRBE in STATUS0\n");
+    }
+  // reset reset complete flag
+  if (write_reg(spifd, STATUS0_MMS, STATUS0_ADDR, (1 << STATUS0_RESETC_POS)))
+    {
+      printf("error resetting RESETC in STATUS0\n");
     }
 
   // blink with dio0 and dio1 in counterphase
@@ -295,29 +442,6 @@ void print_frame(uint8_t *frame, int len, int frame_num)
   printf("\n\n\r");
 }
 
-struct frame_buffer
-{
-  uint8_t data[MAX_FRAME_SIZE];
-  int idx;
-};
-
-struct rxtxbuffer
-{
-  uint8_t rxdata[MAX_FRAME_SIZE];
-  int rxlen;
-  int rx_new;
-  int rx_frame_num;
-
-  uint8_t txdata[MAX_FRAME_SIZE];
-  int txlen;
-  int tx_new;
-};
-
-void rxtxbuffer_init(struct rxtxbuffer *b)
-{
-  struct rxtxbuffer aux = { 0 };
-  *b = aux;
-}
 
 static struct rxtxbuffer rxtxbuf = { 0 };
 static pthread_mutex_t mtx;
@@ -325,131 +449,72 @@ static int end; // termination flag
 
 int mac_phy_task(int argc, char *argv[])
 {
-  /* struct frame_buffer txbuf = { 0 }; */
+  struct frame_buffer txbuf = { 0 };
   struct frame_buffer rxbuf = { 0 };
 
-  struct ncv7410_state s = { 0 };
   uint32_t f;
-  int in_frame = 0;
-  int frame_end = 0;
-  int size_in_chunk = 0;
   int frame_num = 0;
-  uint8_t chunkbuf[CHUNK_DEFAULT_SIZE];
 
   int fd;
   mac_phy_init(&fd);
-  /* while (1) */
-  /*   { */
-  /*     pthread_mutex_lock(&mtx); */
-  /*     for (int i = 'a'; i <= 'z'; i++) */
-  /*       { */
-  /*         rxtxbuf.rxdata[i - 'a'] = i; */
-  /*       } */
-  /*     rxtxbuf.rxlen = 'z' - 'a' + 1; */
-  /*     rxtxbuf.rx_new = 1; */
-  /*     rxtxbuf.rx_frame_num++; */
-  /*     pthread_mutex_unlock(&mtx); */
-  /*     usleep(1000000); */
-  /*   } */
 
   while (1)
     {
-      // check termination condition
+      // check termination condition and txbuf
       pthread_mutex_lock(&mtx);
       if (end)
         {
           pthread_mutex_unlock(&mtx);
           break;
         }
+      if (rxtxbuf.tx_new)
+        {
+          rxtxbuf.tx_new = 0;
+          for (int i = 0; i < rxtxbuf.txlen; i++)
+            {
+              txbuf.data[i] = rxtxbuf.txdata[i];
+            }
+          txbuf.idx = 0;
+          txbuf.len = rxtxbuf.txlen;
+        }
       pthread_mutex_unlock(&mtx);
 
-      f = poll_footer(fd, &s);
+      f = poll_footer(fd);
       if (!get_parity(f))
         {
-          printf("poll footer: footer has bad parity\n\r");
+          printf("poll footer: the footer has bad parity\n\r");
           return 1;
         }
-      if (f & DTPF_HDRB_MASK)
+      if (header_bad(f))
         {
-          printf("HDRB flag in footer\n\r");
+          printf("HDRB flag in the footer\n\r");
           return 1;
         }
 
-      while (s.rca)
+      // while there is something to write or someting to read
+      while (rx_available(f) || txbuf.idx != txbuf.len)
         {
-          f = read_chunk(fd, &s, chunkbuf);
+          f = exchange_chunk(fd, &rxbuf, &txbuf);
+
           if (!get_parity(f))
             {
               printf("read chunk: footer has bad parity\n\r");
               return 1;
             }
-          if (f & DTPF_FD_MASK)  // frame drop
-            {
-              rxbuf.idx = 0;
-              in_frame = 0;
-              break;
-            }
-          if (!(f & DTPF_DV_MASK)) // not valid data
-            {
-              continue;
-            }
 
-
-          if (f & DTPF_SV_MASK)  // start valid
-            {
-              if (! in_frame)
-                {
-                  in_frame = 1;
-                }
-              else
-                {  // drop the frame start came before end
-                  rxbuf.idx = 0;
-                  in_frame = 0;
-                  break;
-                }
-            }
-          if (f & DTPF_EV_MASK)  // end valid
-            {
-              if (in_frame)  // ok -> finish the frame
-                {
-                  size_in_chunk = ((f & DTPF_EBO_MASK) >> DTPF_EBO_POS) + 1;
-                  frame_end = 1;
-                }
-              else // drop
-                {
-                  continue;
-                }
-            }
-          else
-            {
-              size_in_chunk = CHUNK_DEFAULT_PAYLOAD_SIZE;
-            }
-
-          // right here I have valid data and initialized size_in_chunk
-          if (! in_frame)  // drop
-            {
-              continue;
-            }
-
-          // right here I have valid data and initialized size_in_chunk and I am in frame
-          for (int i = 0; i < size_in_chunk; i++)
-            {
-              rxbuf.data[rxbuf.idx++] = chunkbuf[i];
-            }
-          if (frame_end)
+          if (rxbuf.len)
             {
               pthread_mutex_lock(&mtx);
-              for (int i = 0; i < rxbuf.idx; i++)
+              for (int i = 0; i < rxbuf.len; i++)
                 {
                   rxtxbuf.rxdata[i] = rxbuf.data[i];
                 }
-              rxtxbuf.rxlen = rxbuf.idx;
-              rxtxbuf.rx_new = 1;
+              rxtxbuf.rxlen = rxbuf.len;
               rxtxbuf.rx_frame_num = frame_num++;
+              rxtxbuf.rx_new = 1;
               pthread_mutex_unlock(&mtx);
 
-              frame_end = 0;
-              in_frame = 0;
+              rxbuf.len = 0;
               rxbuf.idx = 0;
             }
         }
@@ -485,7 +550,40 @@ int main(int argc, FAR char *argv[])
     {
       // gather input
       /* int r = read(STDIN_FILENO, &c, 1); */
-      read(STDIN_FILENO, &c, 1);
+      int r = read(STDIN_FILENO, &c, 1);
+      if (r != -1 && c == WRITE_MODE_CHAR)
+        {
+          tcsetattr(STDIN_FILENO, TCSAFLUSH, &termios_bak);
+          int linelen = 0;
+          char *line = NULL;
+          size_t n = 0;
+          while (1)
+            {
+              printf("\nEnter the text to be sent as a frame: ");
+              fflush(stdout);
+              linelen = getline(&line, &n, stdin);
+              if (linelen > MAX_FRAME_SIZE)
+                {
+                  printf("Too long!\n");
+                  free(line);
+                  linelen = 0;
+                  line = NULL;
+                  continue;
+                }
+              break;
+            }
+          // write frame to the rxtxbuf
+          pthread_mutex_lock(&mtx);
+          for (int i = 0; i < linelen; i++)
+            {
+              rxtxbuf.txdata[i] = line[i];
+            }
+          rxtxbuf.txlen = linelen;
+          rxtxbuf.tx_new = 1;
+          pthread_mutex_unlock(&mtx);
+          free(line);
+          termios_set_raw(&termios_bak);
+        }
 
       pthread_mutex_lock(&mtx);
       if (rxtxbuf.rx_new)
@@ -530,7 +628,7 @@ int main(int argc, FAR char *argv[])
 
   int fd;
   uint32_t reg;
-  struct ncv7410_state s = { 0 };
+  /* struct ncv7410_state s = { 0 }; */
   char cmd = '\0';
   mac_phy_init(&fd);
 
@@ -557,8 +655,6 @@ int main(int argc, FAR char *argv[])
       printf("PHY CONTROL register:   0x%08lx\n", reg);
       if (read_reg(fd, PHY_STATUS_REG_MMS, PHY_STATUS_REG_ADDR, &reg)) printf("error: ");
       printf("PHY STATUS register:    0x%08lx\n", reg);
-      poll_footer(fd, &s);
-      printf("Chunk available to read: %d\nChunks available to write: %d\n", s.rca, s.txc);
       cmd = getchar();
       if (cmd == 'q') break;
       if (cmd == 'r') reset(fd);
