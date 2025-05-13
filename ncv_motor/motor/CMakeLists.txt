@@ -1,0 +1,11 @@
+if(CONFIG_MOTOR_PWM)
+  nuttx_add_application(
+    NAME
+    motor_pwm
+    STACKSIZE
+    ${CONFIG_DEFAULT_TASK_STACKSIZE}
+    MODULE
+    ${CONFIG_MOTOR_PWM}
+    SRCS
+    motor_pwm.c)
+endif()

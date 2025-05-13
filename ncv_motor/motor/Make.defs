@@ -1,0 +1,3 @@
+ifneq ($(CONFIG_MOTOR_PWM),)
+CONFIGURED_APPS += $(APPDIR)/ncv_motor/motor
+endif
