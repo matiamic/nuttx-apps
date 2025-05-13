@@ -1,0 +1,3 @@
+config MOTOR_REMOTE
+	tristate "Remote controller for motor_pwm program"
+	default n

@@ -1,0 +1,11 @@
+if(CONFIG_MOTOR_PWM)
+  nuttx_add_application(
+    NAME
+    motor_remote
+    STACKSIZE
+    ${CONFIG_DEFAULT_TASK_STACKSIZE}
+    MODULE
+    ${CONFIG_MOTOR_REMOTE}
+    SRCS
+    motor_remote.c)
+endif()
