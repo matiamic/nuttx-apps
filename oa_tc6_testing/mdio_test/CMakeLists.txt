@@ -1,0 +1,11 @@
+if(CONFIG_MDIO_TEST)
+  nuttx_add_application(
+    NAME
+    mdio_test
+    STACKSIZE
+    ${CONFIG_DEFAULT_TASK_STACKSIZE}
+    MODULE
+    ${CONFIG_DBW_STEER}
+    SRCS
+    mdio_test.c)
+endif()
