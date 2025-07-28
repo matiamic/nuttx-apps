@@ -1,0 +1,5 @@
+config MDIO_TEST
+	tristate "MDIO test tool"
+	default n
+	---help---
+		Enable the MDIO test tool

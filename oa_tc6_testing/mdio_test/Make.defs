@@ -1,0 +1,3 @@
+ifneq ($(CONFIG_MDIO_TEST),)
+CONFIGURED_APPS += $(APPDIR)/oa_tc6_testing/mdio_test
+endif
