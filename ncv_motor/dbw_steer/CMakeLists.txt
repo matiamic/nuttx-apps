@@ -1,0 +1,11 @@
+if(CONFIG_MOTOR_PWM)
+  nuttx_add_application(
+    NAME
+    dbw_steer
+    STACKSIZE
+    ${CONFIG_DEFAULT_TASK_STACKSIZE}
+    MODULE
+    ${CONFIG_DBW_STEER}
+    SRCS
+    dbw_steer.c)
+endif()

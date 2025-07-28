@@ -1,0 +1,3 @@
+ifneq ($(CONFIG_DBW_STEER),)
+CONFIGURED_APPS += $(APPDIR)/ncv_motor/dbw_steer
+endif

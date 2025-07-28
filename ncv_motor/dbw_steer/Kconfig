@@ -1,0 +1,6 @@
+config DBW_STEER
+	tristate "Drive-by-wire steering wheel"
+	default n
+	depends on PWM && DEV_GPIO
+	---help---
+		Enable the drive-by-wire demo steering wheel
