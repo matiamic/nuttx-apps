@@ -1,0 +1,3 @@
+ifneq ($(CONFIG_PLCATOOL),)
+CONFIGURED_APPS += $(APPDIR)/oa_tc6_testing/plcatool
+endif

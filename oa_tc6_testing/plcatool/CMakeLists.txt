@@ -1,0 +1,11 @@
+if(CONFIG_PLCATOOL)
+  nuttx_add_application(
+    NAME
+    plcatool
+    STACKSIZE
+    ${CONFIG_DEFAULT_TASK_STACKSIZE}
+    MODULE
+    ${CONFIG_PLCATOOL}
+    SRCS
+    plcatool.c)
+endif()
