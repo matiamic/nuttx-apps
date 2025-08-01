@@ -5,7 +5,7 @@ if(CONFIG_MDIO_TEST)
     STACKSIZE
     ${CONFIG_DEFAULT_TASK_STACKSIZE}
     MODULE
-    ${CONFIG_DBW_STEER}
+    ${CONFIG_PLCATOOL}
     SRCS
     mdio_test.c)
 endif()
