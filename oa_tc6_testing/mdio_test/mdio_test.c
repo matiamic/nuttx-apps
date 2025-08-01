@@ -14,6 +14,10 @@
 #define PHY_CONTROL_ADDR   0x00
 #define PHY_CONTROL_PD_POS 11
 
+/* In the MAC-PHY HW the following is the reflection of the above,
+ * but the following must be accessed with MMD while, the above
+ * is accessed through the basic MII interface access mechanism*/
+
 #define PMA_MMD 1
 #define PMA_CONTROL_ADDR 0x08F9
 #define PMA_CONTROL_LPE_POS 11
