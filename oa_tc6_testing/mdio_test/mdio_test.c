@@ -16,7 +16,8 @@
 
 /* In the MAC-PHY HW the following is the reflection of the above,
  * but the following must be accessed with MMD while, the above
- * is accessed through the basic MII interface access mechanism*/
+ * is accessed through the basic MII interface access mechanism
+ */
 
 #define PMA_MMD 1
 #define PMA_CONTROL_ADDR 0x08F9
@@ -26,59 +27,30 @@ static void prep_mmd(struct ifreq *req,
                      uint8_t mmd, uint16_t address, uint16_t data)
 {
   strcpy(req->ifr_name, IFNAME);
-  req->ifr_ifru.ifru_mmd_data.mmd = mmd;
-  req->ifr_ifru.ifru_mmd_data.addr = address;
-  req->ifr_ifru.ifru_mmd_data.data = data;
+  req->ifr_ifru.ifru_mii_data.phy_id = mdio_phy_id_c45(mmd, 0);
+  req->ifr_ifru.ifru_mii_data.reg_num = address;
+  req->ifr_ifru.ifru_mii_data.val_in = data;
 }
 
 static void prep_mii(struct ifreq *req, uint8_t reg, uint16_t data)
 {
   strcpy(req->ifr_name, IFNAME);
+  req->ifr_ifru.ifru_mii_data.phy_id = 0;
   req->ifr_ifru.ifru_mii_data.reg_num = reg;
   req->ifr_ifru.ifru_mii_data.val_in = data;
-}
-
-static int read_mmd(int socket, uint8_t mmd, uint16_t address, uint16_t *data)
-{
-  struct ifreq req;
-  prep_mmd(&req, mmd, address, 0);
-  int retval = ioctl(socket, SIOCGMMDREG, (unsigned long)(&req));
-  if (retval)
-    {
-      fprintf(stderr, "read_mmd: ioctl failed: %d, %d\n", retval, errno);
-      return ERROR;
-    }
-
-  *data = req.ifr_ifru.ifru_mmd_data.data;
-  return OK;
 }
 
 static int write_mmd(int socket, uint8_t mmd, uint16_t address, uint16_t data)
 {
   struct ifreq req;
   prep_mmd(&req, mmd, address, data);
-  int retval = ioctl(socket, SIOCSMMDREG, (unsigned long)(&req));
+  int retval = ioctl(socket, SIOCSMIIREG, (unsigned long)(&req));
   if (retval)
     {
       fprintf(stderr, "write_mmd: ioctl failed: %d, %d\n", retval, errno);
       return ERROR;
     }
 
-  return OK;
-}
-
-static int read_mii(int socket, uint8_t reg, uint16_t *data)
-{
-  struct ifreq req;
-  prep_mii(&req, reg, 0);
-  int retval = ioctl(socket, SIOCSMIIREG, (unsigned long)(&req));
-  if (retval)
-    {
-      fprintf(stderr, "read_mii: ioctl failed: %d, %d\n", retval, errno);
-      return ERROR;
-    }
-
-  *data = req.ifr_ifru.ifru_mii_data.val_out;
   return OK;
 }
 
