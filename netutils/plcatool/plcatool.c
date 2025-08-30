@@ -116,7 +116,6 @@ int main(int argc, FAR char *argv[])
 
   if (argc < 3)
     {
-      fprintf(stderr, "Too few args\n");
       plcatool_usage();
       return 1;
     }
@@ -131,7 +130,6 @@ int main(int argc, FAR char *argv[])
 
       if (argc < 5)
         {
-          fprintf(stderr, "At least one name-value pair expected\n");
           plcatool_usage();
           return 1;
         }
@@ -144,6 +142,12 @@ int main(int argc, FAR char *argv[])
 
           if (strcmp(name, "enable") == 0)
             {
+              if (PLCA_CFG_IS_SET(&cfg, enable))
+                {
+                  plcatool_usage();
+                  return 1;
+                }
+
               if (strcmp(value, "on") == 0)
                 {
                   PLCA_CFG_SET(&cfg, enable, 1);
@@ -154,7 +158,6 @@ int main(int argc, FAR char *argv[])
                 }
               else
                 {
-                  fprintf(stderr, "on | off are acceptable value for enable\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -162,9 +165,15 @@ int main(int argc, FAR char *argv[])
           else if (strcmp(name, "node-id") == 0)
             {
               int N;
+
+              if (PLCA_CFG_IS_SET(&cfg, node_id))
+                {
+                  plcatool_usage();
+                  return 1;
+                }
+
               if (get_num(value, &N))
                 {
-                  fprintf(stderr, "Not a correct number format\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -175,7 +184,7 @@ int main(int argc, FAR char *argv[])
                 }
               else
                 {
-                  fprintf(stderr, "Out of range\n");
+                  fprintf(stderr, "node-id out of range\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -183,9 +192,16 @@ int main(int argc, FAR char *argv[])
           else if (strcmp(name, "node-cnt") == 0)
             {
               int N;
+
+              if (PLCA_CFG_IS_SET(&cfg, node_cnt))
+                {
+                  plcatool_usage();
+                  return 1;
+                }
+
               if (get_num(value, &N))
                 {
-                  fprintf(stderr, "Not a correct number format\n");
+                  fprintf(stderr, "Not a valid interger\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -196,7 +212,7 @@ int main(int argc, FAR char *argv[])
                 }
               else
                 {
-                  fprintf(stderr, "Out of range\n");
+                  fprintf(stderr, "node-cnt out of range\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -204,9 +220,16 @@ int main(int argc, FAR char *argv[])
           else if (strcmp(name, "to-tmr") == 0)
             {
               int N;
+
+              if (PLCA_CFG_IS_SET(&cfg, to_tmr))
+                {
+                  plcatool_usage();
+                  return 1;
+                }
+
               if (get_num(value, &N))
                 {
-                  fprintf(stderr, "Not a correct number format\n");
+                  fprintf(stderr, "Not a valid interger\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -217,7 +240,7 @@ int main(int argc, FAR char *argv[])
                 }
               else
                 {
-                  fprintf(stderr, "Out of range\n");
+                  fprintf(stderr, "to_tmr out of range\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -225,9 +248,16 @@ int main(int argc, FAR char *argv[])
           else if (strcmp(name, "burst-cnt") == 0)
             {
               int N;
+
+              if (PLCA_CFG_IS_SET(&cfg, burst_cnt))
+                {
+                  plcatool_usage();
+                  return 1;
+                }
+
               if (get_num(value, &N))
                 {
-                  fprintf(stderr, "Not a correct number format\n");
+                  fprintf(stderr, "Not a valid interger\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -238,7 +268,7 @@ int main(int argc, FAR char *argv[])
                 }
               else
                 {
-                  fprintf(stderr, "Out of range\n");
+                  fprintf(stderr, "burst-cnt out of range\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -246,9 +276,16 @@ int main(int argc, FAR char *argv[])
           else if (strcmp(name, "burst-tmr") == 0)
             {
               int N;
+
+              if (PLCA_CFG_IS_SET(&cfg, burst_tmr))
+                {
+                  plcatool_usage();
+                  return 1;
+                }
+
               if (get_num(value, &N))
                 {
-                  fprintf(stderr, "Not a correct number format\n");
+                  fprintf(stderr, "Not a valid interger\n");
                   plcatool_usage();
                   return 1;
                 }
@@ -259,14 +296,13 @@ int main(int argc, FAR char *argv[])
                 }
               else
                 {
-                  fprintf(stderr, "Out of range\n");
+                  fprintf(stderr, "burst-tmr out of range\n");
                   plcatool_usage();
                   return 1;
                 }
             }
           else
             {
-              fprintf(stderr, "Usage\n");
               plcatool_usage();
               return 1;
             }
@@ -274,7 +310,6 @@ int main(int argc, FAR char *argv[])
 
       if (i != argc)
         {
-          fprintf(stderr, "Trailing arguments\n");
           plcatool_usage();
           return 1;
         }
