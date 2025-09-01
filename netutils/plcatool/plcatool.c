@@ -64,10 +64,22 @@
  * Private Types
  ****************************************************************************/
 
+enum plcatool_cmd_e
+{
+  PLCA_CMD_SET,
+  PLCA_CMD_GET,
+  PLCA_CMD_STATUS,
+  PLCA_CMD_HELP
+};
+
 /* Lower 8 bits are value, the most significant bit indicates whether set */
 
 struct plca_cfg_s
 {
+  enum plcatool_cmd_e cmd;
+
+  FAR char *ifname;
+
   uint16_t enable;
   uint16_t node_id;
   uint16_t node_cnt;
@@ -101,8 +113,251 @@ static int get_num(FAR const char *str, FAR int *result)
   return OK;
 }
 
-static void plcatool_usage(void)
+static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
 {
+  const char *cmd;
+
+  if (argc < 2)
+    {
+      return ERROR;
+    }
+
+  cmd = argv[1];
+
+  if (strcmp(cmd, "set") == 0)
+    {
+      int i;
+
+      cfg->cmd = PLCA_CMD_SET;
+
+      if (argc < 5)
+        {
+          return ERROR;
+        }
+
+      cfg->ifname = argv[2];
+
+      i = 3;
+      while (i < argc - 1)
+        {
+          const char *param  = argv[i++];
+          const char *value = argv[i++];
+
+          if (strcmp(param, "enable") == 0)
+            {
+              if (PLCA_CFG_IS_SET(cfg, enable))
+                {
+                  return ERROR;
+                }
+
+              if (strcmp(value, "on") == 0)
+                {
+                  PLCA_CFG_SET(cfg, enable, 1);
+                }
+              else if (strcmp(value, "off") == 0)
+                {
+                  PLCA_CFG_SET(cfg, enable, 0);
+                }
+              else
+                {
+                  return ERROR;
+                }
+            }
+          else if (strcmp(param, "node-id") == 0)
+            {
+              int N;
+
+              if (PLCA_CFG_IS_SET(cfg, node_id))
+                {
+                  return ERROR;
+                }
+
+              if (get_num(value, &N))
+                {
+                  return ERROR;
+                }
+
+              if (NODE_ID_MIN <= N && N <= NODE_ID_MAX)
+                {
+                  PLCA_CFG_SET(cfg, node_id, N);
+                }
+              else
+                {
+                  fprintf(stderr, "node-id out of range\n");
+                  return ERROR;
+                }
+            }
+          else if (strcmp(param, "node-cnt") == 0)
+            {
+              int N;
+
+              if (PLCA_CFG_IS_SET(cfg, node_cnt))
+                {
+                  return ERROR;
+                }
+
+              if (get_num(value, &N))
+                {
+                  fprintf(stderr, "Not a valid interger\n");
+                  return ERROR;
+                }
+
+              if (NODE_CNT_MIN <= N && N <= NODE_CNT_MAX)
+                {
+                  PLCA_CFG_SET(cfg, node_cnt, N);
+                }
+              else
+                {
+                  fprintf(stderr, "node-cnt out of range\n");
+                  return ERROR;
+                }
+            }
+          else if (strcmp(param, "to-tmr") == 0)
+            {
+              int N;
+
+              if (PLCA_CFG_IS_SET(cfg, to_tmr))
+                {
+                  return ERROR;
+                }
+
+              if (get_num(value, &N))
+                {
+                  fprintf(stderr, "Not a valid interger\n");
+                  return ERROR;
+                }
+
+              if (TO_TMR_MIN <= N && N <= TO_TMR_MAX)
+                {
+                  PLCA_CFG_SET(cfg, to_tmr, N);
+                }
+              else
+                {
+                  fprintf(stderr, "to_tmr out of range\n");
+                  return ERROR;
+                }
+            }
+          else if (strcmp(param, "burst-cnt") == 0)
+            {
+              int N;
+
+              if (PLCA_CFG_IS_SET(cfg, burst_cnt))
+                {
+                  return ERROR;
+                }
+
+              if (get_num(value, &N))
+                {
+                  fprintf(stderr, "Not a valid interger\n");
+                  return ERROR;
+                }
+
+              if (BURST_CNT_MIN <= N && N <= BURST_CNT_MAX)
+                {
+                  PLCA_CFG_SET(cfg, burst_cnt, N);
+                }
+              else
+                {
+                  fprintf(stderr, "burst-cnt out of range\n");
+                  return ERROR;
+                }
+            }
+          else if (strcmp(param, "burst-tmr") == 0)
+            {
+              int N;
+
+              if (PLCA_CFG_IS_SET(cfg, burst_tmr))
+                {
+                  return ERROR;
+                }
+
+              if (get_num(value, &N))
+                {
+                  fprintf(stderr, "Not a valid interger\n");
+                  return ERROR;
+                }
+
+              if (BURST_TMR_MIN <= N && N <= BURST_TMR_MAX)
+                {
+                  PLCA_CFG_SET(cfg, burst_tmr, N);
+                }
+              else
+                {
+                  fprintf(stderr, "burst-tmr out of range\n");
+                  return ERROR;
+                }
+            }
+          else
+            {
+              return ERROR;
+            }
+        }
+
+      if (i != argc)
+        {
+          return ERROR;
+        }
+    }
+  else if (strcmp(cmd, "get") == 0)
+    {
+      cfg->cmd = PLCA_CMD_SET;
+
+      if (argc != 3)
+        {
+          return ERROR;
+        }
+
+      cfg->ifname = argv[2];
+    }
+  else if (strcmp(cmd, "status") == 0)
+    {
+      cfg->cmd = PLCA_CMD_STATUS;
+
+      if (argc != 3)
+        {
+          return ERROR;
+        }
+
+      cfg->ifname = argv[2];
+    }
+  else if (strcmp(cmd, "-h") == 0)
+    {
+      cfg->cmd = PLCA_CMD_HELP;
+
+      if (argc != 2)
+        {
+          return ERROR;
+        }
+    }
+
+  return OK;
+}
+
+static int plcatool_set(FAR struct plca_cfg_s *cfg)
+{
+  return OK;
+}
+
+static int plcatool_get(FAR struct plca_cfg_s *cfg)
+{
+  return OK;
+}
+
+static int plcatool_status(FAR struct plca_cfg_s *cfg)
+{
+  return OK;
+}
+
+static void plcatool_usage(bool err)
+{
+  FAR FILE *out = err ? stderr : stdout;
+
+  fprintf(out, "Usage:\n");
+  fprintf(out, "  plcatool status <ifname>\n");
+  fprintf(out, "  plcatool get <ifname>\n");
+  fprintf(out, "  plcatool set <ifname> <param> <value> "
+               "[<param> <value>] ...\n");
+  fprintf(out, "  plcatool -h\n");
 }
 
 /****************************************************************************
@@ -111,208 +366,29 @@ static void plcatool_usage(void)
 
 int main(int argc, FAR char *argv[])
 {
-  const char *cmd;
-  const char *dev;
+  struct plca_cfg_s cfg = { 0 };
 
-  if (argc < 3)
+  int err = parse_args(argc, argv, &cfg);
+  if (err)
     {
-      plcatool_usage();
+      plcatool_usage(err);
       return 1;
     }
 
-  cmd = argv[1];
-  dev = argv[2];
-
-  if (strcmp(cmd, "set") == 0)
+  switch(cfg.cmd)
     {
-      struct plca_cfg_s cfg = { 0 };
-      int i;
+      case PLCA_CMD_SET:
+          return plcatool_set(&cfg);
 
-      if (argc < 5)
-        {
-          plcatool_usage();
-          return 1;
-        }
+      case PLCA_CMD_GET:
+          return plcatool_get(&cfg);
 
-      i = 3;
-      while (i < argc - 1)
-        {
-          const char *name  = argv[i++];
-          const char *value = argv[i++];
+      case PLCA_CMD_STATUS:
+          return plcatool_status(&cfg);
 
-          if (strcmp(name, "enable") == 0)
-            {
-              if (PLCA_CFG_IS_SET(&cfg, enable))
-                {
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (strcmp(value, "on") == 0)
-                {
-                  PLCA_CFG_SET(&cfg, enable, 1);
-                }
-              else if (strcmp(value, "off") == 0)
-                {
-                  PLCA_CFG_SET(&cfg, enable, 0);
-                }
-              else
-                {
-                  plcatool_usage();
-                  return 1;
-                }
-            }
-          else if (strcmp(name, "node-id") == 0)
-            {
-              int N;
-
-              if (PLCA_CFG_IS_SET(&cfg, node_id))
-                {
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (get_num(value, &N))
-                {
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (NODE_ID_MIN <= N && N <= NODE_ID_MAX)
-                {
-                  PLCA_CFG_SET(&cfg, node_id, N);
-                }
-              else
-                {
-                  fprintf(stderr, "node-id out of range\n");
-                  plcatool_usage();
-                  return 1;
-                }
-            }
-          else if (strcmp(name, "node-cnt") == 0)
-            {
-              int N;
-
-              if (PLCA_CFG_IS_SET(&cfg, node_cnt))
-                {
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (get_num(value, &N))
-                {
-                  fprintf(stderr, "Not a valid interger\n");
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (NODE_CNT_MIN <= N && N <= NODE_CNT_MAX)
-                {
-                  PLCA_CFG_SET(&cfg, node_cnt, N);
-                }
-              else
-                {
-                  fprintf(stderr, "node-cnt out of range\n");
-                  plcatool_usage();
-                  return 1;
-                }
-            }
-          else if (strcmp(name, "to-tmr") == 0)
-            {
-              int N;
-
-              if (PLCA_CFG_IS_SET(&cfg, to_tmr))
-                {
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (get_num(value, &N))
-                {
-                  fprintf(stderr, "Not a valid interger\n");
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (TO_TMR_MIN <= N && N <= TO_TMR_MAX)
-                {
-                  PLCA_CFG_SET(&cfg, to_tmr, N);
-                }
-              else
-                {
-                  fprintf(stderr, "to_tmr out of range\n");
-                  plcatool_usage();
-                  return 1;
-                }
-            }
-          else if (strcmp(name, "burst-cnt") == 0)
-            {
-              int N;
-
-              if (PLCA_CFG_IS_SET(&cfg, burst_cnt))
-                {
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (get_num(value, &N))
-                {
-                  fprintf(stderr, "Not a valid interger\n");
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (BURST_CNT_MIN <= N && N <= BURST_CNT_MAX)
-                {
-                  PLCA_CFG_SET(&cfg, burst_cnt, N);
-                }
-              else
-                {
-                  fprintf(stderr, "burst-cnt out of range\n");
-                  plcatool_usage();
-                  return 1;
-                }
-            }
-          else if (strcmp(name, "burst-tmr") == 0)
-            {
-              int N;
-
-              if (PLCA_CFG_IS_SET(&cfg, burst_tmr))
-                {
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (get_num(value, &N))
-                {
-                  fprintf(stderr, "Not a valid interger\n");
-                  plcatool_usage();
-                  return 1;
-                }
-
-              if (BURST_TMR_MIN <= N && N <= BURST_TMR_MAX)
-                {
-                  PLCA_CFG_SET(&cfg, burst_tmr, N);
-                }
-              else
-                {
-                  fprintf(stderr, "burst-tmr out of range\n");
-                  plcatool_usage();
-                  return 1;
-                }
-            }
-          else
-            {
-              plcatool_usage();
-              return 1;
-            }
-        }
-
-      if (i != argc)
-        {
-          plcatool_usage();
-          return 1;
-        }
+      case PLCA_CMD_HELP:
+          plcatool_usage(false);
+          break;
     }
 
   return OK;
