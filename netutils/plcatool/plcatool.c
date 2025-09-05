@@ -155,6 +155,7 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
     }
   else
     {
+      argpos = 1;
       cfg->phy = 0;
     }
 
@@ -372,6 +373,10 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
           return ERROR;
         }
     }
+  else
+    {
+      return ERROR;
+    }
 
   return OK;
 }
@@ -587,23 +592,24 @@ static void plcatool_usage(bool err)
   FAR FILE *out = err ? stderr : stdout;
 
   fprintf(out, "Usage:\n");
-  fprintf(out, "  plcatool status <ifname>\n");
-  fprintf(out, "  plcatool get <ifname>\n");
-  fprintf(out, "  plcatool set <ifname> <param> <value> "
+  fprintf(out, "  plcatool [--phy N] status <ifname>\n");
+  fprintf(out, "  plcatool [--phy N] get <ifname>\n");
+  fprintf(out, "  plcatool [--phy N] set <ifname> <param> <value> "
                "[<param> <value>] ...\n");
   fprintf(out, "    Accepted <param> <value> pairs:\n");
   fprintf(out, "      enable    on | off\n");
-  fprintf(out, "      node-id   N in [%d, %d]\n",
+  fprintf(out, "      node-id   N in [%d .. %d]\n",
           NODE_ID_MIN, NODE_ID_MAX);
-  fprintf(out, "      node-cnt  N in [%d, %d]\n",
+  fprintf(out, "      node-cnt  N in [%d .. %d]\n",
           NODE_CNT_MIN, NODE_CNT_MAX);
-  fprintf(out, "      to-tmr    N in [%d, %d]\n",
+  fprintf(out, "      to-tmr    N in [%d .. %d]\n",
           TO_TMR_MIN, TO_TMR_MAX);
-  fprintf(out, "      burst-cnt N in [%d, %d]\n",
+  fprintf(out, "      burst-cnt N in [%d .. %d]\n",
           BURST_CNT_MIN, BURST_CNT_MAX);
-  fprintf(out, "      burst-tmr N in [%d, %d]\n",
+  fprintf(out, "      burst-tmr N in [%d .. %d]\n",
           BURST_TMR_MIN, BURST_TMR_MAX);
   fprintf(out, "  plcatool -h\n");
+  fprintf(out, "  --phy N defaults to 0\n");
 }
 
 /****************************************************************************
