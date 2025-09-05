@@ -7,6 +7,7 @@
 #define OA_TC14_IDVER_IDM_POS     8
 #define OA_TC14_IDVER_VER_MASK    GENMASK(7, 0)
 #define OA_TC14_IDVER_VER_POS     0
+#define OA_TC14_IDVER_VAL         0x0A10
 
 #define OA_TC14_CTRL0_ADDR        0xCA01
 #define OA_TC14_CTRL0_EN_MASK     BIT(15)
@@ -41,3 +42,9 @@
 #define OA_TC14_DIAG_UNEXPB_POS   1
 #define OA_TC14_DIAG_BCNBFTO_MASK BIT(0)
 #define OA_TC14_DIAG_BCNBFTO_POS  0
+
+#define oa_tc14_get_field(r, fieldname) \
+    (((r) & OA_TC14_##fieldname##_MASK) >> OA_TC14_##fieldname##_POS)
+
+#define oa_tc14_field(val, fieldname) \
+    ((val << OA_TC14_##fieldname##_POS) & OA_TC14_##fieldname##_MASK)

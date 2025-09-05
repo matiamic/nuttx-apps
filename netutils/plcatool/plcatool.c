@@ -32,11 +32,16 @@
 #include <string.h>
 #include <errno.h>
 
+#include <net/if.h>
+#include <sys/ioctl.h>
+
 #include "oa_tc14.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#define ARGS_REMAIN(argc, pos) ((argc) - (pos))
 
 #define PLCA_CFG_SET_BIT 0x8000
 #define PLCA_CFG_SET(cfg, field, val) \
@@ -80,9 +85,11 @@ struct plca_cfg_s
 
   FAR char *ifname;
 
+  uint8_t phy;
+
   uint16_t enable;
-  uint16_t node_id;
   uint16_t node_cnt;
+  uint16_t node_id;
   uint16_t to_tmr;
   uint16_t burst_cnt;
   uint16_t burst_tmr;
@@ -98,7 +105,7 @@ struct plca_cfg_s
 
 static int get_num(FAR const char *str, FAR int *result)
 {
-  char *endptr;
+  FAR char *endptr;
   *result = (int) strtol(str, &endptr, 0);
   if (errno)
     {
@@ -115,33 +122,59 @@ static int get_num(FAR const char *str, FAR int *result)
 
 static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
 {
-  const char *cmd;
+  FAR const char *cmd;
+  int argpos = 1;
 
   if (argc < 2)
     {
       return ERROR;
     }
 
-  cmd = argv[1];
-
-  if (strcmp(cmd, "set") == 0)
+  if (strcmp(argv[argpos++], "--phy") == 0)
     {
-      int i;
+      int phynum;
 
-      cfg->cmd = PLCA_CMD_SET;
-
-      if (argc < 5)
+      if (ARGS_REMAIN(argc, argpos) < 3) /* at least phynum, cmd, intf */
         {
           return ERROR;
         }
 
-      cfg->ifname = argv[2];
-
-      i = 3;
-      while (i < argc - 1)
+      if (get_num(argv[argpos++], &phynum))
         {
-          const char *param  = argv[i++];
-          const char *value = argv[i++];
+          return ERROR;
+        }
+
+      if (0 <= phynum && phynum <= 31)
+        {
+          cfg->phy = phynum;
+        }
+      else
+        {
+          return ERROR;
+        }
+    }
+  else
+    {
+      cfg->phy = 0;
+    }
+
+  cmd = argv[argpos++];
+
+  if (strcmp(cmd, "set") == 0)
+    {
+      cfg->cmd = PLCA_CMD_SET;
+
+      if (ARGS_REMAIN(argc, argpos) < 3) /* ifname, at least one param-value */
+        {
+          return ERROR;
+        }
+
+      cfg->ifname = argv[argpos++];
+
+      while (ARGS_REMAIN(argc, argpos) >= 2) /* at least one param-value */
+        {
+          FAR const char *param = argv[argpos++];
+          FAR const char *value = argv[argpos++];
 
           if (strcmp(param, "enable") == 0)
             {
@@ -293,38 +326,48 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
             }
         }
 
-      if (i != argc)
+      if (ARGS_REMAIN(argc, argpos) != 0)
         {
           return ERROR;
         }
     }
   else if (strcmp(cmd, "get") == 0)
     {
-      cfg->cmd = PLCA_CMD_SET;
+      cfg->cmd = PLCA_CMD_GET;
 
-      if (argc != 3)
+      if (ARGS_REMAIN(argc, argpos) != 1) /* ifname */
         {
           return ERROR;
         }
 
-      cfg->ifname = argv[2];
+      cfg->ifname = argv[argpos++];
+      if (strlen(cfg->ifname) > IFNAMSIZ)
+        {
+          fprintf(stderr, "No such interface\n");
+          return ERROR;
+        }
     }
   else if (strcmp(cmd, "status") == 0)
     {
       cfg->cmd = PLCA_CMD_STATUS;
 
-      if (argc != 3)
+      if (ARGS_REMAIN(argc, argpos) != 1) /* ifname */
         {
           return ERROR;
         }
 
-      cfg->ifname = argv[2];
+      cfg->ifname = argv[argpos++];
+      if (strlen(cfg->ifname) > IFNAMSIZ)
+        {
+          fprintf(stderr, "No such interface\n");
+          return ERROR;
+        }
     }
   else if (strcmp(cmd, "-h") == 0)
     {
       cfg->cmd = PLCA_CMD_HELP;
 
-      if (argc != 2)
+      if (ARGS_REMAIN(argc, argpos) != 0)
         {
           return ERROR;
         }
@@ -333,18 +376,209 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
   return OK;
 }
 
+static int write_plca_mmd(const char *ifname, int phy,
+                          uint16_t address, uint16_t data)
+{
+  struct ifreq req;
+  int retval;
+  int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  strcpy(req.ifr_name, ifname);
+  req.ifr_ifru.ifru_mii_data.phy_id = mdio_phy_id_c45(OA_TC14_PLCA_MMD, phy);
+  req.ifr_ifru.ifru_mii_data.reg_num = address;
+  req.ifr_ifru.ifru_mii_data.val_in = data;
+  retval = ioctl(sockfd, SIOCSMIIREG, (unsigned long)(&req));
+  if (retval)
+    {
+      close(sockfd);
+      fprintf(stderr, "Write unsuccessful\n");
+      return ERROR;
+    }
+
+  close(sockfd);
+  return OK;
+}
+
+static int read_plca_mmd(const char *ifname, int phy,
+                         uint16_t address, uint16_t *data)
+{
+  struct ifreq req;
+  int retval;
+  int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  strcpy(req.ifr_name, ifname);
+  req.ifr_ifru.ifru_mii_data.phy_id = mdio_phy_id_c45(OA_TC14_PLCA_MMD, phy);
+  req.ifr_ifru.ifru_mii_data.reg_num = address;
+
+  retval = ioctl(sockfd, SIOCGMIIREG, (unsigned long)(&req));
+  if (retval)
+    {
+      close(sockfd);
+      fprintf(stderr, "Read unsuccessful\n");
+      return ERROR;
+    }
+
+  *data = req.ifr_ifru.ifru_mii_data.val_out;
+
+  close(sockfd);
+  return OK;
+}
+
 static int plcatool_set(FAR struct plca_cfg_s *cfg)
 {
+  uint16_t reg;
+
+  /* Verify the correct address map code */
+
+  if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_IDVER_ADDR, &reg))
+    {
+      return EIO;
+    }
+
+  if (reg != OA_TC14_IDVER_VAL)
+    {
+      fprintf(stderr, "Device not supported\n");
+      return EINVAL;
+    }
+
+  /* node-cnt, node-id */
+
+  if (PLCA_CFG_IS_SET(cfg, node_cnt) || PLCA_CFG_IS_SET(cfg, node_id))
+    {
+      if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL1_ADDR, &reg))
+        {
+          return EIO;
+        }
+
+      if (PLCA_CFG_IS_SET(cfg, node_cnt))
+        {
+          reg &= ~OA_TC14_CTRL1_NCNT_MASK;
+          reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, node_cnt), CTRL1_NCNT);
+        }
+
+      if (PLCA_CFG_IS_SET(cfg, node_id))
+        {
+          reg &= ~OA_TC14_CTRL1_ID_MASK;
+          reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, node_id), CTRL1_ID);
+        }
+
+      if (write_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL1_ADDR, reg))
+        {
+          return EIO;
+        }
+    }
+
+  /* to-tmr */
+
+  if (PLCA_CFG_IS_SET(cfg, to_tmr))
+    {
+      reg = oa_tc14_field(PLCA_CFG_VAL(cfg, to_tmr), TOTMR_TOT);
+
+      if (write_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_TOTMR_ADDR, reg))
+        {
+          return EIO;
+        }
+    }
+
+  /* burst-cnt, burst-tmr */
+
+  if (PLCA_CFG_IS_SET(cfg, burst_cnt) || PLCA_CFG_IS_SET(cfg, burst_tmr))
+    {
+      if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_BURST_ADDR, &reg))
+        {
+          return EIO;
+        }
+
+      if (PLCA_CFG_IS_SET(cfg, burst_cnt))
+        {
+          reg &= ~OA_TC14_BURST_MAXBC_MASK;
+          reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, burst_cnt), BURST_MAXBC);
+        }
+
+      if (PLCA_CFG_IS_SET(cfg, burst_tmr))
+        {
+          reg &= ~OA_TC14_BURST_BTMR_MASK;
+          reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, burst_tmr), BURST_BTMR);
+        }
+
+      if (write_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_BURST_ADDR, reg))
+        {
+          return EIO;
+        }
+    }
+
+  /* enable */
+
+  if (PLCA_CFG_IS_SET(cfg, enable))
+    {
+      if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL0_ADDR, &reg))
+        {
+          return EIO;
+        }
+
+      reg &= ~OA_TC14_CTRL0_EN_MASK;
+      reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, enable), CTRL0_EN);
+
+      if (write_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL0_ADDR, reg))
+        {
+          return EIO;
+        }
+
+      read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL0_ADDR, &reg);
+    }
+
   return OK;
 }
 
 static int plcatool_get(FAR struct plca_cfg_s *cfg)
 {
+  uint16_t ctrl0;
+  uint16_t ctrl1;
+  uint16_t totmr;
+  uint16_t burst;
+
+  if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL0_ADDR, &ctrl0) ||
+      read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL1_ADDR, &ctrl1) ||
+      read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_TOTMR_ADDR, &totmr) ||
+      read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_BURST_ADDR, &burst))
+    {
+      return EIO;
+    }
+
+  cfg->enable    = oa_tc14_get_field(ctrl0, CTRL0_EN);
+  cfg->node_id   = oa_tc14_get_field(ctrl1, CTRL1_ID);
+  cfg->node_cnt  = oa_tc14_get_field(ctrl1, CTRL1_NCNT);
+  cfg->to_tmr    = oa_tc14_get_field(totmr, TOTMR_TOT);
+  cfg->burst_cnt = oa_tc14_get_field(burst, BURST_MAXBC);
+  cfg->burst_tmr = oa_tc14_get_field(burst, BURST_BTMR);
+
+  printf("PLCA settings for %s\n", cfg->ifname);
+  printf("\tEnabled: %s\n", cfg->enable ? "Yes" : "No");
+  printf("\tlocal node ID: %d (%s)\n", cfg->node_id,
+         cfg->node_id == 0 ? "coordinator" :
+         (cfg->node_id == 255 ? "unconfigured" : "follower"));
+  printf("\tNode count: %d%s\n", cfg->node_cnt,
+         cfg->node_id ? " (ignored)" : "");
+  printf("\tTO timer: %d BT\n", cfg->to_tmr);
+  printf("\tBurst count: %d (%s)\n", cfg->burst_cnt,
+         cfg->burst_cnt > 0 ? "enabled" : "disabled");
+  printf("\tBurst timer: %d BT\n", cfg->burst_tmr);
+
   return OK;
 }
 
 static int plcatool_status(FAR struct plca_cfg_s *cfg)
 {
+  uint16_t status;
+  if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_STATUS_ADDR, &status))
+    {
+      return EIO;
+    }
+
+  printf("PLCA status of %s\n", cfg->ifname);
+  printf("\tStatus: %s\n",
+         oa_tc14_get_field(status, STATUS_PST) ? "on" : "off");
+
   return OK;
 }
 
@@ -357,6 +591,18 @@ static void plcatool_usage(bool err)
   fprintf(out, "  plcatool get <ifname>\n");
   fprintf(out, "  plcatool set <ifname> <param> <value> "
                "[<param> <value>] ...\n");
+  fprintf(out, "    Accepted <param> <value> pairs:\n");
+  fprintf(out, "      enable    on | off\n");
+  fprintf(out, "      node-id   N in [%d, %d]\n",
+          NODE_ID_MIN, NODE_ID_MAX);
+  fprintf(out, "      node-cnt  N in [%d, %d]\n",
+          NODE_CNT_MIN, NODE_CNT_MAX);
+  fprintf(out, "      to-tmr    N in [%d, %d]\n",
+          TO_TMR_MIN, TO_TMR_MAX);
+  fprintf(out, "      burst-cnt N in [%d, %d]\n",
+          BURST_CNT_MIN, BURST_CNT_MAX);
+  fprintf(out, "      burst-tmr N in [%d, %d]\n",
+          BURST_TMR_MIN, BURST_TMR_MAX);
   fprintf(out, "  plcatool -h\n");
 }
 
@@ -372,7 +618,7 @@ int main(int argc, FAR char *argv[])
   if (err)
     {
       plcatool_usage(err);
-      return 1;
+      return EINVAL;
     }
 
   switch(cfg.cmd)
