@@ -618,7 +618,8 @@ static void plcatool_usage(bool err)
 
 int main(int argc, FAR char *argv[])
 {
-  struct plca_cfg_s cfg = { 0 };
+  struct plca_cfg_s cfg;
+  memset(&cfg, 0, sizeof(cfg));
 
   int err = parse_args(argc, argv, &cfg);
   if (err)
@@ -627,7 +628,7 @@ int main(int argc, FAR char *argv[])
       return EINVAL;
     }
 
-  switch(cfg.cmd)
+  switch (cfg.cmd)
     {
       case PLCA_CMD_SET:
           return plcatool_set(&cfg);
