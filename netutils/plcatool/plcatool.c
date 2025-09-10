@@ -47,7 +47,6 @@
 #define PLCA_CFG_SET(cfg, field, val) \
     do {(cfg)->field = PLCA_CFG_SET_BIT | ((val) & 0xff);} while (0)
 
-#define PLCA_CFG_IS_SET(cfg, field) ((cfg)->field & PLCA_CFG_SET_BIT)
 #define PLCA_CFG_VAL(cfg, field)    ((cfg)->field & 0xff)
 
 #define NODE_ID_MIN   0
@@ -179,7 +178,7 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
 
           if (strcmp(param, "enable") == 0)
             {
-              if (PLCA_CFG_IS_SET(cfg, enable))
+              if (cfg->enable)
                 {
                   return ERROR;
                 }
@@ -201,7 +200,7 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
             {
               int N;
 
-              if (PLCA_CFG_IS_SET(cfg, node_id))
+              if (cfg->node_id)
                 {
                   return ERROR;
                 }
@@ -225,7 +224,7 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
             {
               int N;
 
-              if (PLCA_CFG_IS_SET(cfg, node_cnt))
+              if (cfg->node_cnt)
                 {
                   return ERROR;
                 }
@@ -250,7 +249,7 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
             {
               int N;
 
-              if (PLCA_CFG_IS_SET(cfg, to_tmr))
+              if (cfg->to_tmr)
                 {
                   return ERROR;
                 }
@@ -275,7 +274,7 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
             {
               int N;
 
-              if (PLCA_CFG_IS_SET(cfg, burst_cnt))
+              if (cfg->burst_cnt)
                 {
                   return ERROR;
                 }
@@ -300,7 +299,7 @@ static int parse_args(int argc, FAR char *argv[], FAR struct plca_cfg_s *cfg)
             {
               int N;
 
-              if (PLCA_CFG_IS_SET(cfg, burst_tmr))
+              if (cfg->burst_tmr)
                 {
                   return ERROR;
                 }
@@ -448,20 +447,20 @@ static int plcatool_set(FAR struct plca_cfg_s *cfg)
 
   /* node-cnt, node-id */
 
-  if (PLCA_CFG_IS_SET(cfg, node_cnt) || PLCA_CFG_IS_SET(cfg, node_id))
+  if (cfg->node_cnt || cfg->node_id)
     {
       if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL1_ADDR, &reg))
         {
           return EIO;
         }
 
-      if (PLCA_CFG_IS_SET(cfg, node_cnt))
+      if (cfg->node_cnt)
         {
           reg &= ~OA_TC14_CTRL1_NCNT_MASK;
           reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, node_cnt), CTRL1_NCNT);
         }
 
-      if (PLCA_CFG_IS_SET(cfg, node_id))
+      if (cfg->node_id)
         {
           reg &= ~OA_TC14_CTRL1_ID_MASK;
           reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, node_id), CTRL1_ID);
@@ -475,7 +474,7 @@ static int plcatool_set(FAR struct plca_cfg_s *cfg)
 
   /* to-tmr */
 
-  if (PLCA_CFG_IS_SET(cfg, to_tmr))
+  if (cfg->to_tmr)
     {
       reg = oa_tc14_field(PLCA_CFG_VAL(cfg, to_tmr), TOTMR_TOT);
 
@@ -487,20 +486,20 @@ static int plcatool_set(FAR struct plca_cfg_s *cfg)
 
   /* burst-cnt, burst-tmr */
 
-  if (PLCA_CFG_IS_SET(cfg, burst_cnt) || PLCA_CFG_IS_SET(cfg, burst_tmr))
+  if (cfg->burst_cnt || cfg->burst_tmr)
     {
       if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_BURST_ADDR, &reg))
         {
           return EIO;
         }
 
-      if (PLCA_CFG_IS_SET(cfg, burst_cnt))
+      if (cfg->burst_cnt)
         {
           reg &= ~OA_TC14_BURST_MAXBC_MASK;
           reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, burst_cnt), BURST_MAXBC);
         }
 
-      if (PLCA_CFG_IS_SET(cfg, burst_tmr))
+      if (cfg->burst_tmr)
         {
           reg &= ~OA_TC14_BURST_BTMR_MASK;
           reg |= oa_tc14_field(PLCA_CFG_VAL(cfg, burst_tmr), BURST_BTMR);
@@ -514,7 +513,7 @@ static int plcatool_set(FAR struct plca_cfg_s *cfg)
 
   /* enable */
 
-  if (PLCA_CFG_IS_SET(cfg, enable))
+  if (cfg->enable)
     {
       if (read_plca_mmd(cfg->ifname, cfg->phy, OA_TC14_CTRL0_ADDR, &reg))
         {
